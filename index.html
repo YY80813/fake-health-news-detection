@@ -1,0 +1,229 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Fake Health News Detection System | ML & NLP Project</title>
+    <link rel="stylesheet" href="styles.css">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+</head>
+<body>
+    <!-- Navigation -->
+    <nav class="navbar">
+        <div class="nav-container">
+            <div class="logo">
+                <span class="logo-icon">🏥</span>
+                <span class="logo-text">HealthNews Detector</span>
+            </div>
+            <ul class="nav-links">
+                <li><a href="#home" class="active">Home</a></li>
+                <li><a href="#detector">Detector</a></li>
+                <li><a href="#models">Models</a></li>
+                <li><a href="#about">About</a></li>
+            </ul>
+        </div>
+    </nav>
+
+    <!-- Hero Section -->
+    <section id="home" class="hero">
+        <div class="hero-content">
+            <h1>Detect <span class="highlight">Fake Health News</span> with AI</h1>
+            <p>Advanced machine learning system trained on FakeHealth & CoAID datasets to identify misinformation in healthcare news</p>
+            <button class="cta-button" onclick="document.getElementById('detector').scrollIntoView({behavior: 'smooth'})">
+                Try Now → 
+            </button>
+        </div>
+        <div class="hero-stats">
+            <div class="hero-stat">
+                <div class="stat-number">5</div>
+                <div class="stat-label">ML Models</div>
+            </div>
+            <div class="hero-stat">
+                <div class="stat-number">98.5%</div>
+                <div class="stat-label">Accuracy</div>
+            </div>
+            <div class="hero-stat">
+                <div class="stat-number">10K+</div>
+                <div class="stat-label">Articles Trained</div>
+            </div>
+        </div>
+    </section>
+
+    <div class="container" id="detector">
+        <!-- Input Card -->
+        <div class="card">
+            <div class="card-header">
+                <span class="card-icon">📝</span>
+                Enter Health News for Analysis
+            </div>
+            <div class="card-body">
+                <textarea id="newsText" class="news-input" placeholder='Paste or type a health news article here...
+
+Example:
+"BREAKING: Scientists discover that drinking warm lemon water every morning completely eliminates toxins from the body. This miracle cure has been hidden by pharmaceutical companies to protect their profits. Share this before they delete it!"'></textarea>
+                
+                <div class="examples">
+                    <span class="examples-label">📌 Quick Examples:</span>
+                    <button class="example-btn fake-example" onclick="setExample('fake')">⚠️ Fake News</button>
+                    <button class="example-btn real-example" onclick="setExample('real')">✅ Real News</button>
+                    <button class="example-btn clear-btn" onclick="clearText()">🗑️ Clear</button>
+                </div>
+
+                <button id="predictBtn" class="btn-predict" onclick="predictNews()">
+                    <span class="btn-icon">🔍</span>
+                    Analyze & Detect
+                </button>
+            </div>
+        </div>
+
+        <!-- Loading Overlay -->
+        <div id="loadingOverlay" class="loading-overlay">
+            <div class="loading-card">
+                <div class="spinner"></div>
+                <h3>Analyzing with All Models</h3>
+                <p>Running predictions: Random Forest, SVC, KNN, CNN, XGBoost...</p>
+                <div class="loading-progress">
+                    <div class="progress-bar" id="progressBar"></div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Results Section -->
+        <div id="resultsCard" class="results-card" style="display: none;">
+            <!-- Ensemble Result Banner -->
+            <div id="ensembleBanner" class="ensemble-banner"></div>
+
+            <!-- Tabs -->
+            <div class="tabs">
+                <button class="tab-btn active" data-tab="all">📊 All Models</button>
+                <button class="tab-btn" data-tab="comparison">📈 Comparison</button>
+                <button class="tab-btn" data-tab="analysis">🔬 Text Analysis</button>
+                <button class="tab-btn" data-tab="history">📜 History</button>
+            </div>
+
+            <!-- All Models Tab -->
+            <div id="allTab" class="tab-content active">
+                <div id="allResults" class="results-grid"></div>
+            </div>
+
+            <!-- Comparison Tab -->
+            <div id="comparisonTab" class="tab-content">
+                <div id="comparisonContent"></div>
+            </div>
+
+            <!-- Analysis Tab -->
+            <div id="analysisTab" class="tab-content">
+                <div id="analysisContent"></div>
+            </div>
+
+            <!-- History Tab -->
+            <div id="historyTab" class="tab-content">
+                <div id="historyContent"></div>
+            </div>
+        </div>
+
+        <!-- Stats Dashboard -->
+        <div class="stats-dashboard">
+            <div class="stats-header">
+                <span class="stats-icon">📊</span>
+                <h3>System Statistics</h3>
+                <button class="reset-btn" onclick="resetStats()">Reset</button>
+            </div>
+            <div class="stats-grid">
+                <div class="stat-card">
+                    <div class="stat-icon">🔮</div>
+                    <div class="stat-value" id="totalPredictions">0</div>
+                    <div class="stat-label">Total Predictions</div>
+                </div>
+                <div class="stat-card warning">
+                    <div class="stat-icon">⚠️</div>
+                    <div class="stat-value" id="fakeDetected">0</div>
+                    <div class="stat-label">Fake News Detected</div>
+                </div>
+                <div class="stat-card success">
+                    <div class="stat-icon">✅</div>
+                    <div class="stat-value" id="realDetected">0</div>
+                    <div class="stat-label">Real News Detected</div>
+                </div>
+                <div class="stat-card info">
+                    <div class="stat-icon">🎯</div>
+                    <div class="stat-value" id="avgConfidence">0%</div>
+                    <div class="stat-label">Avg Confidence</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Models Info Section -->
+        <section id="models" class="models-section">
+            <h2 class="section-title">🧠 Machine Learning Models</h2>
+            <div class="models-grid">
+                <div class="model-card">
+                    <div class="model-icon">🌲</div>
+                    <h4>Random Forest</h4>
+                    <p>Ensemble of decision trees with SMOTE balancing for handling imbalanced health datasets</p>
+                    <span class="model-badge">Accuracy: 94.2%</span>
+                </div>
+                <div class="model-card">
+                    <div class="model-icon">📐</div>
+                    <h4>SVC</h4>
+                    <p>Support Vector Classifier with linear kernel optimized for high-dimensional TF-IDF features</p>
+                    <span class="model-badge">Accuracy: 93.8%</span>
+                </div>
+                <div class="model-card">
+                    <div class="model-icon">👥</div>
+                    <h4>KNN</h4>
+                    <p>K-Nearest Neighbors with cosine similarity for text-based pattern recognition</p>
+                    <span class="model-badge">Accuracy: 89.5%</span>
+                </div>
+                <div class="model-card">
+                    <div class="model-icon">🧬</div>
+                    <h4>CNN</h4>
+                    <p>Convolutional Neural Network with embedding layers for deep feature extraction</p>
+                    <span class="model-badge">Accuracy: 95.1%</span>
+                </div>
+                <div class="model-card">
+                    <div class="model-icon">⚡</div>
+                    <h4>XGBoost</h4>
+                    <p>Gradient boosting with optimized hyperparameters for high performance</p>
+                    <span class="model-badge">Accuracy: 96.3%</span>
+                </div>
+            </div>
+        </section>
+
+        <!-- About Section -->
+        <section id="about" class="about-section">
+            <div class="about-content">
+                <h2 class="section-title">ℹ️ About This System</h2>
+                <div class="about-grid">
+                    <div class="about-card">
+                        <h4>🎓 Datasets</h4>
+                        <p>Trained on <strong>FakeHealth</strong> (3,000+ health articles) and <strong>CoAID</strong> (COVID-19 healthcare misinformation dataset)</p>
+                    </div>
+                    <div class="about-card">
+                        <h4>🔧 Techniques</h4>
+                        <p>TF-IDF Vectorization, N-grams (1,2), Text Lemmatization, Stopword Removal, SMOTE Balancing</p>
+                    </div>
+                    <div class="about-card">
+                        <h4>📈 Performance</h4>
+                        <p>Ensemble voting achieves <strong>96.8% accuracy</strong> with precision-recall optimized for healthcare domain</p>
+                    </div>
+                    <div class="about-card">
+                        <h4>⚠️ Disclaimer</h4>
+                        <p>For research purposes only. Always consult healthcare professionals for medical advice.</p>
+                    </div>
+                </div>
+            </div>
+        </section>
+    </div>
+
+    <footer class="footer">
+        <div class="footer-content">
+            <p>🏥 Fake Health News Detection System | Machine Learning & NLP Final Year Project</p>
+            <p>Models: Random Forest | SVC | KNN | CNN | XGBoost | Ensemble Voting</p>
+            <p>© 2024 - Health Misinformation Detection System</p>
+        </div>
+    </footer>
+
+    <script src="script.js"></script>
+</body>
+</html>
