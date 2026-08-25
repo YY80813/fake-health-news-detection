@@ -1,0 +1,9 @@
+{
+  "name": "fake-health-news-detection",
+  "version": "1.0.0",
+  "description": "Fake Health News Detection System - front end + official-source verification backend",
+  "private": true,
+  "scripts": {
+    "dev": "vercel dev"
+  }
+}

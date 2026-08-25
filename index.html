@@ -1,0 +1,185 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Fake Health News Detection System | LLM-Powered Fact Check</title>
+    <link rel="stylesheet" href="styles.css">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+</head>
+<body>
+    <!-- Navigation -->
+    <nav class="navbar">
+        <div class="nav-container">
+            <div class="logo">
+                <span class="logo-icon">🏥</span>
+                <span class="logo-text">HealthNews Detector</span>
+            </div>
+            <ul class="nav-links">
+                <li><a href="#home" class="active">Home</a></li>
+                <li><a href="#detector">Detector</a></li>
+                <li><a href="#about">About</a></li>
+            </ul>
+        </div>
+    </nav>
+
+    <!-- Hero Section -->
+    <section id="home" class="hero">
+        <div class="hero-content">
+            <h1>Detect <span class="highlight">Fake Health News</span> with AI</h1>
+            <p>AI-powered fact-checking that cross-references health claims against official sources — BBC Health, Malaysia's Ministry of Health (KKM), WHO, and CDC</p>
+            <button class="cta-button" onclick="document.getElementById('detector').scrollIntoView({behavior: 'smooth'})">
+                Try Now →
+            </button>
+        </div>
+        <div class="hero-stats">
+            <div class="hero-stat">
+                <div class="stat-number">AI</div>
+                <div class="stat-label">LLM-Powered Verification</div>
+            </div>
+            <div class="hero-stat">
+                <div class="stat-number">4</div>
+                <div class="stat-label">Official Sources</div>
+            </div>
+            <div class="hero-stat">
+                <div class="stat-number">Live</div>
+                <div class="stat-label">Real-Time Web Search</div>
+            </div>
+        </div>
+    </section>
+
+    <div class="container" id="detector">
+        <!-- Input Card -->
+        <div class="card">
+            <div class="card-header">
+                <span class="card-icon">📝</span>
+                Enter Health News for Analysis
+            </div>
+            <div class="card-body">
+                <textarea id="newsText" class="news-input" placeholder='Paste or type a health news article here...
+
+Example:
+"BREAKING: Scientists discover that drinking warm lemon water every morning completely eliminates toxins from the body. This miracle cure has been hidden by pharmaceutical companies to protect their profits. Share this before they delete it!"'></textarea>
+
+                <div class="examples">
+                    <span class="examples-label">📌 Quick Examples:</span>
+                    <button class="example-btn fake-example" onclick="setExample('fake')">⚠️ Fake News</button>
+                    <button class="example-btn real-example" onclick="setExample('real')">✅ Real News</button>
+                    <button class="example-btn clear-btn" onclick="clearText()">🗑️ Clear</button>
+                </div>
+
+                <button id="predictBtn" class="btn-predict" onclick="predictNews()">
+                    <span class="btn-icon">🔍</span>
+                    Analyze & Detect
+                </button>
+            </div>
+        </div>
+
+        <!-- Loading Overlay -->
+        <div id="loadingOverlay" class="loading-overlay">
+            <div class="loading-card">
+                <div class="spinner"></div>
+                <h3>Checking Official Sources</h3>
+                <p id="loadingText">Searching BBC Health, KKM, WHO and CDC for related coverage...</p>
+                <div class="loading-progress">
+                    <div class="progress-bar" id="progressBar"></div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Results Section -->
+        <div id="resultsCard" class="results-card" style="display: none;">
+            <!-- Verdict Banner -->
+            <div id="resultBanner" class="ensemble-banner"></div>
+
+            <!-- Tabs -->
+            <div class="tabs">
+                <button class="tab-btn active" data-tab="official">🌐 Official Check</button>
+                <button class="tab-btn" data-tab="analysis">🔬 Text Analysis</button>
+                <button class="tab-btn" data-tab="history">📜 History</button>
+            </div>
+
+            <!-- Official Source Check Tab -->
+            <div id="officialTab" class="tab-content active">
+                <div id="officialContent"></div>
+            </div>
+
+            <!-- Analysis Tab -->
+            <div id="analysisTab" class="tab-content">
+                <div id="analysisContent"></div>
+            </div>
+
+            <!-- History Tab -->
+            <div id="historyTab" class="tab-content">
+                <div id="historyContent"></div>
+            </div>
+        </div>
+
+        <!-- Stats Dashboard -->
+        <div class="stats-dashboard">
+            <div class="stats-header">
+                <span class="stats-icon">📊</span>
+                <h3>System Statistics</h3>
+                <button class="reset-btn" onclick="resetStats()">Reset</button>
+            </div>
+            <div class="stats-grid">
+                <div class="stat-card">
+                    <div class="stat-icon">🔮</div>
+                    <div class="stat-value" id="totalPredictions">0</div>
+                    <div class="stat-label">Total Checks</div>
+                </div>
+                <div class="stat-card warning">
+                    <div class="stat-icon">⚠️</div>
+                    <div class="stat-value" id="fakeDetected">0</div>
+                    <div class="stat-label">Fake News Detected</div>
+                </div>
+                <div class="stat-card success">
+                    <div class="stat-icon">✅</div>
+                    <div class="stat-value" id="realDetected">0</div>
+                    <div class="stat-label">Real News Verified</div>
+                </div>
+                <div class="stat-card info">
+                    <div class="stat-icon">🎯</div>
+                    <div class="stat-value" id="avgConfidence">0%</div>
+                    <div class="stat-label">Avg Confidence</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- About Section -->
+        <section id="about" class="about-section">
+            <div class="about-content">
+                <h2 class="section-title">ℹ️ About This System</h2>
+                <div class="about-grid">
+                    <div class="about-card">
+                        <h4>🤖 How It Works</h4>
+                        <p>Your submitted article is sent to an LLM (Claude) with a web-search tool. The LLM searches trusted official domains and returns a verdict on whether your article's claims are supported or contradicted</p>
+                    </div>
+                    <div class="about-card">
+                        <h4>🌐 Official Source Check</h4>
+                        <p>Verification is scoped to official outlets only: BBC Health, Malaysia's Ministry of Health (KKM), WHO and CDC — not general web results</p>
+                    </div>
+                    <div class="about-card">
+                        <h4>📎 Cited Evidence</h4>
+                        <p>Every verdict comes with links to the specific official pages the model used, so you can check the sources yourself</p>
+                    </div>
+                    <div class="about-card">
+                        <h4>⚠️ Disclaimer</h4>
+                        <p>For research purposes only. Always consult healthcare professionals for medical advice.</p>
+                    </div>
+                </div>
+            </div>
+        </section>
+    </div>
+
+    <footer class="footer">
+        <div class="footer-content">
+            <p>🏥 Fake Health News Detection System | LLM-Powered Official Source Verification</p>
+            <p>Final Year Project — Malaysia's Ministry of Health (KKM) &amp; BBC Health &amp; WHO &amp; CDC</p>
+            <p>© 2024 - Health Misinformation Detection System</p>
+        </div>
+    </footer>
+
+    <script src="script.js"></script>
+</body>
+</html>
