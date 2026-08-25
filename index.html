@@ -49,6 +49,17 @@
     </section>
 
     <div class="container" id="detector">
+        <!-- Official Health News Panel -->
+        <div class="news-panel">
+            <div class="news-panel-header">
+                <span>📰 Latest from Official Health Sources</span>
+                <button class="news-refresh-btn" onclick="loadOfficialNews()" title="Refresh">🔄</button>
+            </div>
+            <div id="newsPanelContent" class="news-panel-content">
+                <div class="news-panel-empty">Loading latest headlines…</div>
+            </div>
+        </div>
+
         <!-- Input Card -->
         <div class="card">
             <div class="card-header">

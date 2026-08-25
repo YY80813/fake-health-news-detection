@@ -22,11 +22,16 @@ const FAKE_KEYWORDS = [
 
 let predictionHistory = [];
 
+// Where the "Latest from Official Health Sources" panel gets its data (see
+// api/news.js). Same same-origin-by-default convention as VERIFY_API_URL.
+const NEWS_API_URL = '/api/news';
+
 // Initialize tabs
 document.addEventListener('DOMContentLoaded', () => {
     initTabs();
     initStats();
     loadHistory();
+    loadOfficialNews();
 });
 
 function initTabs() {
@@ -191,6 +196,59 @@ function escapeHtml(str) {
     const div = document.createElement('div');
     div.textContent = String(str);
     return div.innerHTML;
+}
+
+// ============================================================================
+// "Latest from Official Health Sources" panel — plain RSS headlines from
+// BBC Health / WHO / CDC via api/news.js. No LLM involved, so this is
+// unaffected by any AI-provider rate limits.
+// ============================================================================
+
+function relativeTime(pubDate) {
+    if (!pubDate) return '';
+    const then = Date.parse(pubDate);
+    if (isNaN(then)) return '';
+    const diffMs = Date.now() - then;
+    if (diffMs < 0) return '';
+    const mins = Math.floor(diffMs / 60000);
+    if (mins < 60) return mins <= 1 ? 'just now' : `${mins}m ago`;
+    const hours = Math.floor(mins / 60);
+    if (hours < 24) return `${hours}h ago`;
+    const days = Math.floor(hours / 24);
+    if (days < 7) return `${days}d ago`;
+    return new Date(then).toLocaleDateString();
+}
+
+async function loadOfficialNews() {
+    const content = document.getElementById('newsPanelContent');
+    const refreshBtn = document.querySelector('.news-refresh-btn');
+    if (refreshBtn) refreshBtn.classList.add('spinning');
+
+    try {
+        const response = await fetch(NEWS_API_URL);
+        if (!response.ok) throw new Error(`Request failed (${response.status})`);
+        const data = await response.json();
+        const items = Array.isArray(data.items) ? data.items : [];
+
+        if (items.length === 0) {
+            content.innerHTML = '<div class="news-panel-empty">No headlines available right now. Try refreshing, or visit BBC Health, WHO, or CDC directly.</div>';
+            return;
+        }
+
+        content.innerHTML = items.map(item => `
+            <a class="news-item" href="${escapeHtml(item.url)}" target="_blank" rel="noopener noreferrer">
+                <div class="news-item-title">${escapeHtml(item.title)}</div>
+                <div class="news-item-meta">
+                    <span class="news-item-publisher">${escapeHtml(item.publisher)}</span>
+                    ${item.pubDate ? ' · ' + escapeHtml(relativeTime(item.pubDate)) : ''}
+                </div>
+            </a>
+        `).join('');
+    } catch (err) {
+        content.innerHTML = `<div class="news-panel-empty">Couldn't load official headlines right now (${escapeHtml(err.message)}). Make sure api/news.js is deployed.</div>`;
+    } finally {
+        if (refreshBtn) refreshBtn.classList.remove('spinning');
+    }
 }
 
 // ============================================================================
