@@ -49,110 +49,162 @@
     </section>
 
     <div class="container" id="detector">
-        <!-- Official Health News Panel -->
-        <div class="news-panel">
-            <div class="news-panel-header">
-                <span>📰 Latest from Official Health Sources</span>
-                <button class="news-refresh-btn" onclick="loadOfficialNews()" title="Refresh">🔄</button>
-            </div>
-            <div id="newsPanelContent" class="news-panel-content">
-                <div class="news-panel-empty">Loading latest headlines…</div>
-            </div>
-        </div>
+        <div class="detector-layout">
+            <!-- Official Health Sources Sidebar -->
+            <aside class="source-sidebar">
+                <div class="source-sidebar-header">
+                    <span class="source-sidebar-icon">✅</span>
+                    <span>Official Health Sources</span>
+                </div>
+                <p class="source-sidebar-desc">Every claim submitted below is checked only against these trusted, authoritative outlets — never blogs, forums, or social media.</p>
+                <ul class="source-sidebar-list">
+                    <li>
+                        <a class="source-sidebar-item" href="https://www.bbc.com/news/health" target="_blank" rel="noopener noreferrer">
+                            <span class="source-sidebar-item-icon">📰</span>
+                            <span class="source-sidebar-item-text">
+                                <span class="source-sidebar-item-name">BBC Health</span>
+                                <span class="source-sidebar-item-desc">International health news &amp; reporting</span>
+                            </span>
+                        </a>
+                    </li>
+                    <li>
+                        <a class="source-sidebar-item" href="https://www.moh.gov.my" target="_blank" rel="noopener noreferrer">
+                            <span class="source-sidebar-item-icon">🇲🇾</span>
+                            <span class="source-sidebar-item-text">
+                                <span class="source-sidebar-item-name">Ministry of Health Malaysia (KKM)</span>
+                                <span class="source-sidebar-item-desc">Malaysia's official health authority</span>
+                            </span>
+                        </a>
+                    </li>
+                    <li>
+                        <a class="source-sidebar-item" href="https://www.who.int" target="_blank" rel="noopener noreferrer">
+                            <span class="source-sidebar-item-icon">🌍</span>
+                            <span class="source-sidebar-item-text">
+                                <span class="source-sidebar-item-name">World Health Organization</span>
+                                <span class="source-sidebar-item-desc">United Nations global health agency</span>
+                            </span>
+                        </a>
+                    </li>
+                    <li>
+                        <a class="source-sidebar-item" href="https://www.cdc.gov" target="_blank" rel="noopener noreferrer">
+                            <span class="source-sidebar-item-icon">🏥</span>
+                            <span class="source-sidebar-item-text">
+                                <span class="source-sidebar-item-name">CDC</span>
+                                <span class="source-sidebar-item-desc">U.S. Centers for Disease Control &amp; Prevention</span>
+                            </span>
+                        </a>
+                    </li>
+                </ul>
+            </aside>
 
-        <!-- Input Card -->
-        <div class="card">
-            <div class="card-header">
-                <span class="card-icon">📝</span>
-                Enter Health News for Analysis
-            </div>
-            <div class="card-body">
-                <textarea id="newsText" class="news-input" placeholder='Paste or type a health news article here...
+            <!-- Main detector column -->
+            <div class="detector-main">
+                <!-- Official Health News Panel -->
+                <div class="news-panel">
+                    <div class="news-panel-header">
+                        <span>📰 Latest from Official Health Sources</span>
+                        <button class="news-refresh-btn" onclick="loadOfficialNews()" title="Refresh">🔄</button>
+                    </div>
+                    <div id="newsPanelContent" class="news-panel-content">
+                        <div class="news-panel-empty">Loading latest headlines…</div>
+                    </div>
+                </div>
+
+                <!-- Input Card -->
+                <div class="card">
+                    <div class="card-header">
+                        <span class="card-icon">📝</span>
+                        Enter Health News for Analysis
+                    </div>
+                    <div class="card-body">
+                        <textarea id="newsText" class="news-input" placeholder='Paste or type a health news article here...
 
 Example:
 "BREAKING: Scientists discover that drinking warm lemon water every morning completely eliminates toxins from the body. This miracle cure has been hidden by pharmaceutical companies to protect their profits. Share this before they delete it!"'></textarea>
 
-                <div class="examples">
-                    <span class="examples-label">📌 Quick Examples:</span>
-                    <button class="example-btn fake-example" onclick="setExample('fake')">⚠️ Fake News</button>
-                    <button class="example-btn real-example" onclick="setExample('real')">✅ Real News</button>
-                    <button class="example-btn clear-btn" onclick="clearText()">🗑️ Clear</button>
+                        <div class="examples">
+                            <span class="examples-label">📌 Quick Examples:</span>
+                            <button class="example-btn fake-example" onclick="setExample('fake')">⚠️ Fake News</button>
+                            <button class="example-btn real-example" onclick="setExample('real')">✅ Real News</button>
+                            <button class="example-btn clear-btn" onclick="clearText()">🗑️ Clear</button>
+                        </div>
+
+                        <button id="predictBtn" class="btn-predict" onclick="predictNews()">
+                            <span class="btn-icon">🔍</span>
+                            Analyze & Detect
+                        </button>
+                    </div>
                 </div>
 
-                <button id="predictBtn" class="btn-predict" onclick="predictNews()">
-                    <span class="btn-icon">🔍</span>
-                    Analyze & Detect
-                </button>
-            </div>
-        </div>
-
-        <!-- Loading Overlay -->
-        <div id="loadingOverlay" class="loading-overlay">
-            <div class="loading-card">
-                <div class="spinner"></div>
-                <h3>Checking Official Sources</h3>
-                <p id="loadingText">Searching BBC Health, KKM, WHO and CDC for related coverage...</p>
-                <div class="loading-progress">
-                    <div class="progress-bar" id="progressBar"></div>
+                <!-- Loading Overlay -->
+                <div id="loadingOverlay" class="loading-overlay">
+                    <div class="loading-card">
+                        <div class="spinner"></div>
+                        <h3>Checking Official Sources</h3>
+                        <p id="loadingText">Searching BBC Health, KKM, WHO and CDC for related coverage...</p>
+                        <div class="loading-progress">
+                            <div class="progress-bar" id="progressBar"></div>
+                        </div>
+                    </div>
                 </div>
-            </div>
-        </div>
 
-        <!-- Results Section -->
-        <div id="resultsCard" class="results-card" style="display: none;">
-            <!-- Verdict Banner -->
-            <div id="resultBanner" class="ensemble-banner"></div>
+                <!-- Results Section -->
+                <div id="resultsCard" class="results-card" style="display: none;">
+                    <!-- Verdict Banner -->
+                    <div id="resultBanner" class="ensemble-banner"></div>
 
-            <!-- Tabs -->
-            <div class="tabs">
-                <button class="tab-btn active" data-tab="official">🌐 Official Check</button>
-                <button class="tab-btn" data-tab="analysis">🔬 Text Analysis</button>
-                <button class="tab-btn" data-tab="history">📜 History</button>
-            </div>
+                    <!-- Tabs -->
+                    <div class="tabs">
+                        <button class="tab-btn active" data-tab="official">🌐 Official Check</button>
+                        <button class="tab-btn" data-tab="analysis">🔬 Text Analysis</button>
+                        <button class="tab-btn" data-tab="history">📜 History</button>
+                    </div>
 
-            <!-- Official Source Check Tab -->
-            <div id="officialTab" class="tab-content active">
-                <div id="officialContent"></div>
-            </div>
+                    <!-- Official Source Check Tab -->
+                    <div id="officialTab" class="tab-content active">
+                        <div id="officialContent"></div>
+                    </div>
 
-            <!-- Analysis Tab -->
-            <div id="analysisTab" class="tab-content">
-                <div id="analysisContent"></div>
-            </div>
+                    <!-- Analysis Tab -->
+                    <div id="analysisTab" class="tab-content">
+                        <div id="analysisContent"></div>
+                    </div>
 
-            <!-- History Tab -->
-            <div id="historyTab" class="tab-content">
-                <div id="historyContent"></div>
-            </div>
-        </div>
-
-        <!-- Stats Dashboard -->
-        <div class="stats-dashboard">
-            <div class="stats-header">
-                <span class="stats-icon">📊</span>
-                <h3>System Statistics</h3>
-                <button class="reset-btn" onclick="resetStats()">Reset</button>
-            </div>
-            <div class="stats-grid">
-                <div class="stat-card">
-                    <div class="stat-icon">🔮</div>
-                    <div class="stat-value" id="totalPredictions">0</div>
-                    <div class="stat-label">Total Checks</div>
+                    <!-- History Tab -->
+                    <div id="historyTab" class="tab-content">
+                        <div id="historyContent"></div>
+                    </div>
                 </div>
-                <div class="stat-card warning">
-                    <div class="stat-icon">⚠️</div>
-                    <div class="stat-value" id="fakeDetected">0</div>
-                    <div class="stat-label">Fake News Detected</div>
-                </div>
-                <div class="stat-card success">
-                    <div class="stat-icon">✅</div>
-                    <div class="stat-value" id="realDetected">0</div>
-                    <div class="stat-label">Real News Verified</div>
-                </div>
-                <div class="stat-card info">
-                    <div class="stat-icon">🎯</div>
-                    <div class="stat-value" id="avgConfidence">0%</div>
-                    <div class="stat-label">Avg Confidence</div>
+
+                <!-- Stats Dashboard -->
+                <div class="stats-dashboard">
+                    <div class="stats-header">
+                        <span class="stats-icon">📊</span>
+                        <h3>System Statistics</h3>
+                        <button class="reset-btn" onclick="resetStats()">Reset</button>
+                    </div>
+                    <div class="stats-grid">
+                        <div class="stat-card">
+                            <div class="stat-icon">🔮</div>
+                            <div class="stat-value" id="totalPredictions">0</div>
+                            <div class="stat-label">Total Checks</div>
+                        </div>
+                        <div class="stat-card warning">
+                            <div class="stat-icon">⚠️</div>
+                            <div class="stat-value" id="fakeDetected">0</div>
+                            <div class="stat-label">Fake News Detected</div>
+                        </div>
+                        <div class="stat-card success">
+                            <div class="stat-icon">✅</div>
+                            <div class="stat-value" id="realDetected">0</div>
+                            <div class="stat-label">Real News Verified</div>
+                        </div>
+                        <div class="stat-card info">
+                            <div class="stat-icon">🎯</div>
+                            <div class="stat-value" id="avgConfidence">0%</div>
+                            <div class="stat-label">Avg Confidence</div>
+                        </div>
+                    </div>
                 </div>
             </div>
         </div>

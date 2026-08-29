@@ -142,6 +142,96 @@ body {
     padding: 2rem;
 }
 
+/* Detector layout (sidebar + main column) */
+.detector-layout {
+    display: grid;
+    grid-template-columns: 280px 1fr;
+    align-items: start;
+    gap: 1.5rem;
+}
+
+.detector-main {
+    min-width: 0;
+}
+
+/* Official Health Sources Sidebar */
+.source-sidebar {
+    background: white;
+    border-radius: 16px;
+    box-shadow: 0 5px 20px rgba(0,0,0,0.08);
+    padding: 1.3rem;
+    position: sticky;
+    top: 90px;
+}
+
+.source-sidebar-header {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    font-weight: 700;
+    font-size: 1rem;
+    color: #2d3748;
+    margin-bottom: 0.6rem;
+}
+
+.source-sidebar-icon {
+    font-size: 1.1rem;
+}
+
+.source-sidebar-desc {
+    font-size: 0.8rem;
+    color: #718096;
+    line-height: 1.45;
+    margin-bottom: 1.1rem;
+}
+
+.source-sidebar-list {
+    list-style: none;
+    display: flex;
+    flex-direction: column;
+    gap: 0.6rem;
+}
+
+.source-sidebar-item {
+    display: flex;
+    align-items: flex-start;
+    gap: 0.65rem;
+    padding: 0.7rem 0.65rem;
+    border: 1px solid #e2e8f0;
+    border-radius: 12px;
+    text-decoration: none;
+    transition: border-color 0.2s, background 0.2s, transform 0.2s;
+}
+
+.source-sidebar-item:hover {
+    border-color: #667eea;
+    background: #f7fafc;
+    transform: translateY(-2px);
+}
+
+.source-sidebar-item-icon {
+    font-size: 1.3rem;
+    line-height: 1;
+}
+
+.source-sidebar-item-text {
+    display: flex;
+    flex-direction: column;
+    gap: 0.15rem;
+}
+
+.source-sidebar-item-name {
+    font-size: 0.85rem;
+    font-weight: 600;
+    color: #2d3748;
+}
+
+.source-sidebar-item-desc {
+    font-size: 0.72rem;
+    color: #a0aec0;
+    line-height: 1.3;
+}
+
 /* Official Health News Panel */
 .news-panel {
     background: white;
@@ -733,6 +823,14 @@ body {
 
     .container {
         padding: 1rem;
+    }
+
+    .detector-layout {
+        grid-template-columns: 1fr;
+    }
+
+    .source-sidebar {
+        position: static;
     }
 
     .source-list {

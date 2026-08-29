@@ -10,33 +10,35 @@
 // handler wrapped differently — the logic below is platform-agnostic.
 //
 // Setup:
-//   1. Get a Gemini API key: https://aistudio.google.com/apikey
+//   1. Get an OpenAI API key: https://platform.openai.com/api-keys
 //   2. In your deployment platform, set an environment variable:
-//        GEMINI_API_KEY = AQ....
+//        OPENAI_API_KEY = sk-...
 //      (On Vercel: Project Settings -> Environment Variables)
 //   3. Deploy. The front end calls POST /api/verify with { text }.
 //
 // What it does:
-//   Sends the submitted article to Gemini with Google Search grounding
-//   turned on, so it can search the live web for related coverage. Gemini's
-//   grounding tool does NOT support a domain allowlist the way some other
-//   providers' search tools do, so instead of trusting that restriction to
-//   happen upstream, this function enforces it itself: after the model
-//   responds, every cited source is checked against ALLOWED_DOMAINS
-//   (BBC Health, Malaysia's Ministry of Health / KKM, WHO, CDC) and anything
-//   outside that list is dropped. If NOTHING it found was on an official
-//   domain, the verdict is forced to "unverified" — the model's opinion is
-//   never trusted blind on which sources count as official.
+//   Sends the submitted article to OpenAI's Responses API with the built-in
+//   web_search tool turned on, so it can search the live web for related
+//   coverage. Like most providers' web-search tools, this one doesn't offer
+//   a reliable "only search these domains" restriction — so instead of
+//   trusting that to happen upstream, this function enforces it itself:
+//   after the model responds, every citation it actually used is checked
+//   against ALLOWED_DOMAINS (BBC Health, Malaysia's Ministry of Health /
+//   KKM, WHO, CDC) and anything outside that list is dropped. If NOTHING it
+//   found was on an official domain, the verdict is forced to "unverified"
+//   — the model's own opinion on what counts as official is never trusted
+//   blind.
 //
 // NOTE: This was written and syntax-checked, but could not be live-tested
-// against the real Gemini API from the environment that built it (no network
-// route to generativelanguage.googleapis.com there). Test it once deployed —
-// see DEPLOYMENT.md — and if Google has changed the request/response shape
-// since this was written, the two most likely breakage points are the model
-// name (GEMINI_MODEL below) and the grounding tool key ("google_search").
+// against the real OpenAI API from the environment that built it (no
+// network route to api.openai.com there). Test it once deployed — see
+// DEPLOYMENT.md — and if OpenAI has changed the request/response shape
+// since this was written, the two most likely breakage points are the
+// model name (OPENAI_MODEL below) and the web-search tool's type string
+// ("web_search" — older docs called this "web_search_preview").
 
-const GEMINI_MODEL = 'gemini-flash-latest'; // Google-maintained alias for their current stable Flash model
-const GEMINI_API_URL = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent`;
+const OPENAI_MODEL = 'gpt-4.1-mini'; // swap to 'gpt-5-mini' or similar if you want a newer model
+const OPENAI_API_URL = 'https://api.openai.com/v1/responses';
 
 // Add or remove domains here to change what counts as an "official source".
 // Matching is by hostname suffix (e.g. "bbc.com" also matches "www.bbc.com").
@@ -52,7 +54,7 @@ const ALLOWED_DOMAINS = [
 const SYSTEM_PROMPT = `You are a fact-checking assistant working alongside a health-news
 classifier. You will be given a submitted health news article.
 
-Use Google Search to check whether the article's central health claims are
+Use web search to check whether the article's central health claims are
 supported, contradicted, or simply not addressed by OFFICIAL sources —
 specifically BBC Health, Malaysia's Ministry of Health (KKM), WHO, or CDC.
 When you search, prefer queries scoped to those sites (for example
@@ -103,10 +105,10 @@ module.exports = async function handler(req, res) {
     return;
   }
 
-  const apiKey = process.env.GEMINI_API_KEY;
+  const apiKey = process.env.OPENAI_API_KEY;
   if (!apiKey) {
     res.status(500).json({
-      error: 'Server is missing GEMINI_API_KEY. Set it as an environment variable in your deployment.'
+      error: 'Server is missing OPENAI_API_KEY. Set it as an environment variable in your deployment.'
     });
     return;
   }
@@ -127,34 +129,39 @@ module.exports = async function handler(req, res) {
   }
 
   try {
-    const upstream = await fetch(GEMINI_API_URL, {
+    const upstream = await fetch(OPENAI_API_URL, {
       method: 'POST',
       headers: {
         'content-type': 'application/json',
-        'x-goog-api-key': apiKey
+        authorization: `Bearer ${apiKey}`
       },
       body: JSON.stringify({
-        systemInstruction: { parts: [{ text: SYSTEM_PROMPT }] },
-        contents: [
-          { role: 'user', parts: [{ text: `Submitted article:\n\n"""${text}"""` }] }
-        ],
-        tools: [{ google_search: {} }],
-        generationConfig: { temperature: 0.2 }
+        model: OPENAI_MODEL,
+        instructions: SYSTEM_PROMPT,
+        input: `Submitted article:\n\n"""${text}"""`,
+        tools: [{ type: 'web_search' }],
+        temperature: 0.2
       })
     });
 
     if (!upstream.ok) {
       const errText = await upstream.text();
-      res.status(502).json({ error: `Gemini API error (${upstream.status})`, detail: errText });
+      res.status(502).json({ error: `OpenAI API error (${upstream.status})`, detail: errText });
       return;
     }
 
     const data = await upstream.json();
-    const candidate = (data.candidates && data.candidates[0]) || null;
 
-    const finalText = candidate && candidate.content && candidate.content.parts
-      ? candidate.content.parts.map((p) => p.text || '').join('\n').trim()
-      : '';
+    // The Responses API returns an "output" array mixing tool-call items
+    // (e.g. web_search_call) with the final assistant "message" item. We
+    // want the message's text and its url_citation annotations.
+    const messageItem = (data.output || []).find((item) => item.type === 'message');
+    const contentItem = messageItem && Array.isArray(messageItem.content)
+      ? messageItem.content.find((c) => c.type === 'output_text')
+      : null;
+
+    const finalText = contentItem ? (contentItem.text || '').trim() : '';
+    const annotations = (contentItem && contentItem.annotations) || [];
 
     let parsed;
     try {
@@ -171,32 +178,30 @@ module.exports = async function handler(req, res) {
       return;
     }
 
-    // Pull the REAL search results Gemini's grounding tool actually used,
-    // rather than trusting anything the model claims in prose. Then filter
-    // to official domains only.
-    const groundingChunks = (candidate.groundingMetadata && candidate.groundingMetadata.groundingChunks) || [];
+    // Pull the REAL citations the model's web search actually used, rather
+    // than trusting anything it claims in prose. Then filter to official
+    // domains only.
     const seen = new Set();
     const officialSources = [];
-    for (const chunk of groundingChunks) {
-      const web = chunk.web;
-      if (!web || !web.uri) continue;
+    for (const annotation of annotations) {
+      if (annotation.type !== 'url_citation' || !annotation.url) continue;
       let hostname = '';
       try {
-        hostname = new URL(web.uri).hostname;
+        hostname = new URL(annotation.url).hostname;
       } catch {
         continue;
       }
       if (!hostnameMatchesAllowed(hostname)) continue;
-      if (seen.has(web.uri)) continue;
-      seen.add(web.uri);
+      if (seen.has(annotation.url)) continue;
+      seen.add(annotation.url);
       officialSources.push({
-        title: web.title || web.uri,
-        url: web.uri,
+        title: annotation.title || annotation.url,
+        url: annotation.url,
         publisher: hostname.replace(/^www\./, '')
       });
     }
 
-    // Safety net: if grounding didn't turn up anything on an official
+    // Safety net: if the citations didn't turn up anything on an official
     // domain, don't let a "supported"/"contradicted" verdict stand — we
     // can't back it with an official citation, so it's unverified.
     if (officialSources.length === 0 && parsed.verdict !== 'unverified') {
@@ -213,6 +218,6 @@ module.exports = async function handler(req, res) {
       sources: officialSources
     });
   } catch (err) {
-    res.status(500).json({ error: 'Request to Gemini API failed', detail: String(err) });
+    res.status(500).json({ error: 'Request to OpenAI API failed', detail: String(err) });
   }
 };
