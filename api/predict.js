@@ -46,7 +46,11 @@
 // first - a build failure or crash there means the request never reaches
 // this function's error handling at all.
 
-const SPACE_TIMEOUT_MS = 60000; // Spaces can take a while to wake from sleep
+// ZeroGPU Spaces (see hf-space/README.md) can take longer than a plain CPU
+// Space to wake from sleep - on top of the usual container cold start,
+// there's also a queue for a shared GPU allocation - so this is set higher
+// than a bare "Space waking up" timeout would otherwise need to be.
+const SPACE_TIMEOUT_MS = 90000;
 
 module.exports = async function handler(req, res) {
   // Allow the static front end to call this even if it's hosted on a
