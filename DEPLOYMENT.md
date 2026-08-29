@@ -103,15 +103,24 @@ callable API before this website can use it.
 approach tried here, but it only serves a curated allow-list of "warm"
 models — a custom fine-tuned checkpoint like this one gets rejected with
 `"Model not supported by provider hf-inference"`. The fix: run the model
-yourself in a **Hugging Face Space** (their free CPU tier gives 16GB RAM —
-plenty for a BERT-base model), using the small FastAPI app already set up
-for you in this repo's `hf-space/` folder.
+yourself in a **Hugging Face Space**, using the small Gradio app already
+set up for you in this repo's `hf-space/` folder.
 
-**1. Push the model to Hugging Face Hub**, from the end of
-`FYP_pubmedbert_finetuned.ipynb` (right after `trainer.train()`, so the
-`model` and `tokenizer` variables still hold the best checkpoint —
-`load_best_model_at_end=True` in that notebook's `TrainingArguments` already
-ensures `model` is the best epoch, not just the last one):
+**Why Gradio and not Docker?** Hugging Face's earlier free Docker SDK path
+was tried next, but HF changed its pricing in 2026 so that creating a *new*
+Docker SDK Space on free CPU basic hardware now requires a paid plan.
+Gradio SDK Spaces on free CPU basic hardware are still free to create, and
+Gradio automatically exposes the model as a callable REST endpoint the same
+way the Docker/FastAPI version did — just with a slightly different
+request/response shape, which `api/predict.js` already handles.
+
+**1. Push the model to Hugging Face Hub** — **already done for this
+project**, at `YY80813/pubmedbert-fake-health-news`. (For reference, this
+was done from the end of `FYP_pubmedbert_finetuned.ipynb`, right after
+`trainer.train()`, so the `model` and `tokenizer` variables still held the
+best checkpoint — `load_best_model_at_end=True` in that notebook's
+`TrainingArguments` already ensures `model` is the best epoch, not just the
+last one:
 
 ```python
 !pip install huggingface_hub --quiet
@@ -125,43 +134,55 @@ notebook_login()  # paste a HF *write* token: https://huggingface.co/settings/to
 model.config.id2label = {0: "Fake", 1: "Real"}
 model.config.label2id = {"Fake": 0, "Real": 1}
 
-REPO_ID = "your-hf-username/pubmedbert-fake-health-news"  # <-- change this
+REPO_ID = "YY80813/pubmedbert-fake-health-news"
 model.push_to_hub(REPO_ID)
 tokenizer.push_to_hub(REPO_ID)
 ```
 
-You'll need a (free) Hugging Face account for this. If you already did this
-step earlier, no need to redo it — the model repo itself doesn't change,
-only how it gets served does.
+If you ever retrain and want to push a new version, just rerun this cell —
+no other setup below needs to change.)
 
 **2. Create a Hugging Face Space**: go to https://huggingface.co/new-space →
-give it a name → **SDK: Docker** → **Hardware: CPU basic (free)** → Create
+give it a name → **SDK: Gradio** → **Hardware**: whatever's offered for
+free (currently free accounts are being assigned "ZeroGPU" hardware rather
+than plain CPU basic — that's fine, `app.py` doesn't need a GPU) → Create
 Space.
 
 **3. Upload the Space's files**: from this repo's `hf-space/` folder, upload
-`Dockerfile`, `app.py`, `requirements.txt`, and `README.md` to the new
-Space — either via its "Files" tab's upload button, or by cloning the
-Space's own git repo (Hugging Face gives every Space a git remote, shown on
-its page) and pushing them there.
+`app.py`, `requirements.txt`, and `README.md` to the new Space — either via
+its "Files" tab's upload button, or by cloning the Space's own git repo
+(Hugging Face gives every Space a git remote, shown on its page) and
+pushing them there. Don't upload `Dockerfile` if it's still in that folder
+from an earlier version of this project — the Gradio SDK ignores it, but
+its presence can confuse the build.
 
 **4. Set the model repo on the Space**: in the Space's **Settings →
-Variables and secrets**, add a variable `MODEL_REPO` = the `REPO_ID` from
-step 1 (e.g. `your-hf-username/pubmedbert-fake-health-news`). Alternatively,
-edit the default value directly in `app.py` before uploading it.
+Variables and secrets**, add a variable `MODEL_REPO` =
+`YY80813/pubmedbert-fake-health-news`. This matches the default already
+baked into `app.py`, so this step is optional unless you push to a
+different model repo later.
 
 **5. Wait for the build**, watching the Space's "Logs" tab — the first
 build downloads and installs PyTorch, so it can take several minutes. Once
 it says "Running", the Space's URL follows the pattern
 `https://<your-username>-<space-name>.hf.space` (shown on the Space's page).
-Test it works by visiting `<that-url>/docs` (FastAPI's built-in Swagger UI)
-and trying the `/predict` endpoint with some sample text there directly.
+Test it two ways: open the Space's own page (**App** tab — it shows a live
+text box you can paste an article into), and test the API the website will
+actually call — Gradio 4+ (which is what gets installed here) answers API
+calls in two steps: `POST` to `<that-url>/gradio_api/call/predict` with
+JSON body `{"data": ["some health article text of at least 30
+characters..."]}` returns an `event_id`, then `GET`
+`<that-url>/gradio_api/call/predict/<event_id>` streams back the result.
+`api/predict.js` already does both steps for you — the Space's own "Use via
+API" link (bottom of its page) shows working curl examples if you want to
+test by hand.
 
 **6. Set the environment variable** on your website's deployment platform
 (Vercel: Settings → Environment Variables), same as `OPENAI_API_KEY`:
    - `HF_SPACE_URL` = the Space URL from step 5
 
 **7. Deploy (or redeploy)**. The "Your Model" tab calls `POST /api/predict`,
-which forwards the text to `POST <HF_SPACE_URL>/predict` and returns a
+which drives the two-step call above against `<HF_SPACE_URL>` and returns a
 fake/real verdict with a confidence score.
 
 **Notes:**
@@ -185,3 +206,18 @@ fake/real verdict with a confidence score.
   a different model repo in step 1, point `MODEL_REPO` at it in step 4) —
   the GloVe+SVC baseline would need `app.py` adjusted since it isn't a
   Hugging Face transformers model.
+- **`hf-space/requirements.txt` deliberately does not pin a Gradio
+  version.** Spaces on ZeroGPU hardware force-install their own Gradio into
+  the container regardless of what's requested — pinning a different
+  version there caused a hard pip conflict (`ResolutionImpossible`) during
+  the build. `api/predict.js` is written for Gradio 4+'s queue/event-stream
+  API, which has been stable since Gradio 4.
+- **`hf-space/requirements.txt` also installs `transformers` from GitHub
+  instead of PyPI**, as a temporary workaround for a separate conflict:
+  `huggingface_hub` just had a `1.0` major release, Gradio 6.26.0 needs
+  `huggingface-hub>=1.16.0,<2.0`, and every `transformers` release on PyPI
+  as of writing still caps `huggingface-hub<1.0` — an unsatisfiable
+  combination that also showed up as `ResolutionImpossible`. The fix is
+  already merged into `transformers`' unreleased code, just not published
+  yet, so `hf-space/requirements.txt` installs straight from its GitHub
+  `main` branch until a fixed PyPI release ships.

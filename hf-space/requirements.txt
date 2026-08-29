@@ -1,6 +1,25 @@
---extra-index-url https://download.pytorch.org/whl/cpu
-fastapi>=0.110,<1.0
-uvicorn[standard]>=0.30,<1.0
-transformers>=4.40,<5.0
-torch>=2.2,<3.0
-pydantic>=2.0,<3.0
+# Deliberately does NOT pin gradio, torch, or spaces here. This Space was
+# assigned "ZeroGPU" hardware by Hugging Face (shown as "Building on ZERO"
+# on the Space page), and its build pipeline force-installs its own Gradio
+# (6.26.0 as of writing), torch, and the `spaces` package into every
+# ZeroGPU Space regardless of what's listed here - pinning a different
+# Gradio version here (as an earlier version of this file did, at 3.50.2)
+# causes a hard pip dependency conflict during the build
+# ("ResolutionImpossible"). Only list what the platform doesn't already
+# provide.
+#
+# transformers is installed straight from GitHub's main branch rather than
+# a normal PyPI version pin because of a temporary ecosystem-wide gap:
+# huggingface_hub just had a 1.0 major release, Gradio 6.26.0 requires
+# huggingface-hub>=1.16.0,<2.0, but every transformers release on PyPI so
+# far (up to 4.57.6) still hard-caps huggingface-hub<1.0 - those two
+# requirements can never both be satisfied together from released
+# packages, which is exactly the "ResolutionImpossible" conflict this
+# caused. The fix is already merged into transformers' unreleased code
+# (main now requires huggingface-hub>=1.5.0,<2.0, which IS compatible with
+# Gradio's requirement) but hasn't shipped as a stable PyPI release yet, so
+# installing directly from the repo is the workaround until it does. Once
+# a new transformers version is released on PyPI with that fixed
+# constraint, this can be switched back to a normal "transformers>=X,<Y"
+# line.
+transformers @ git+https://github.com/huggingface/transformers.git

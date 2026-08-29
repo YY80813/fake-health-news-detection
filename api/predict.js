@@ -13,16 +13,32 @@
 // Running the model yourself in a Space's own container (free CPU tier:
 // 16GB RAM) sidesteps that limitation.
 //
+// The Space runs Gradio (not Docker/FastAPI - Hugging Face now requires a
+// paid plan to create new Docker SDK Spaces on free hardware, but Gradio
+// SDK Spaces are still free to create). Free accounts are currently being
+// assigned "ZeroGPU" hardware for new Gradio Spaces, whose build pipeline
+// forces a specific newer Gradio version (6.x as of writing) - see
+// hf-space/requirements.txt and hf-space/README.md for why that matters.
+//
+// Gradio 4+ (including that 6.x) exposes API-enabled functions through a
+// two-step, queue-based protocol rather than a single synchronous request:
+//   1. POST {space_url}/gradio_api/call/predict  with { data: [...] }
+//      -> returns { event_id: "..." } almost immediately.
+//   2. GET  {space_url}/gradio_api/call/predict/<event_id>
+//      -> a server-sent-events stream that ends with the actual result
+//         once the function finishes running.
+// callSpace() below does both steps and parses the SSE stream.
+//
 // Setup:
 //   1. Push the fine-tuned model + tokenizer to a Hugging Face model repo
 //      (see hf-space/README.md and the main DEPLOYMENT.md for the Colab
 //      snippet - this step doesn't change from before).
-//   2. Create a Hugging Face Space (Docker SDK) and upload the files in
+//   2. Create a Hugging Face Space (Gradio SDK) and upload the files in
 //      hf-space/ to it - full walkthrough in hf-space/README.md.
 //   3. In your deployment platform, set:
 //        HF_SPACE_URL = https://<your-username>-<space-name>.hf.space
 //   4. Deploy. The front end calls POST /api/predict with { text }, which
-//      forwards to POST <HF_SPACE_URL>/predict.
+//      drives the two-step call above against <HF_SPACE_URL>.
 //
 // NOTE: Like the other api/*.js files, this could not be live-tested from
 // the environment that built it (no network route to huggingface.co
@@ -72,10 +88,10 @@ module.exports = async function handler(req, res) {
     return;
   }
 
-  const endpoint = spaceUrl.replace(/\/+$/, '') + '/predict';
+  const base = spaceUrl.replace(/\/+$/, '');
 
   try {
-    const scores = await callSpace(endpoint, text);
+    const scores = await callSpace(base, text);
     const result = interpretScores(scores);
     res.status(200).json(result);
   } catch (err) {
@@ -88,18 +104,45 @@ module.exports = async function handler(req, res) {
   }
 };
 
-async function callSpace(endpoint, text) {
+async function callSpace(base, text) {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), SPACE_TIMEOUT_MS);
 
-  let response;
   try {
-    response = await fetch(endpoint, {
+    // Step 1: kick off the call. Gradio's REST API takes positional inputs
+    // as a "data" array matching the Interface's inputs list -
+    // hf-space/app.py has one input (the Textbox), so a single-element
+    // array here.
+    const postRes = await fetch(base + '/gradio_api/call/predict', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ text }),
+      body: JSON.stringify({ data: [text] }),
       signal: controller.signal
     });
+    if (!postRes.ok) {
+      const errText = await postRes.text();
+      throw new Error(`Space returned an error (${postRes.status}) starting the call: ${errText.slice(0, 300)}`);
+    }
+    const { event_id: eventId } = await postRes.json();
+    if (!eventId) throw new Error('Space did not return an event_id to poll for the result.');
+
+    // Step 2: read the result. This request stays open (as a
+    // server-sent-events stream) until the Space's predict() function
+    // finishes running, which is also where a cold-started Space's wake-up
+    // delay shows up - the same AbortController/timeout above covers both
+    // steps combined.
+    const getRes = await fetch(`${base}/gradio_api/call/predict/${eventId}`, {
+      method: 'GET',
+      headers: { accept: 'text/event-stream' },
+      signal: controller.signal
+    });
+    if (!getRes.ok) {
+      const errText = await getRes.text();
+      throw new Error(`Space returned an error (${getRes.status}) fetching the result: ${errText.slice(0, 300)}`);
+    }
+
+    const raw = await getRes.text();
+    return parseSseResult(raw);
   } catch (err) {
     if (err.name === 'AbortError') {
       throw new Error('The model Space took too long to respond (it may be waking up from sleep - try again in a moment).');
@@ -108,16 +151,46 @@ async function callSpace(endpoint, text) {
   } finally {
     clearTimeout(timeout);
   }
+}
 
-  if (!response.ok) {
-    const errText = await response.text();
-    throw new Error(`Space returned an error (${response.status}): ${errText.slice(0, 300)}`);
+// Parses Gradio's server-sent-events response into the actual value
+// returned by hf-space/app.py's predict(). A typical stream looks like:
+//   event: complete
+//   data: [{"scores": [...]}]
+//
+// (possibly preceded by "event: heartbeat" keep-alive lines with no data,
+// which are ignored here - only the *last* "data:" line is used, since
+// that's the one carrying the final result.)
+function parseSseResult(raw) {
+  let lastData = null;
+  let sawError = false;
+
+  for (const line of raw.split('\n')) {
+    if (line.startsWith('event: error')) sawError = true;
+    if (line.startsWith('data:')) lastData = line.slice(5).trim();
   }
 
-  const data = await response.json();
-  if (data && !Array.isArray(data) && data.error) throw new Error(data.error);
-  if (!Array.isArray(data)) throw new Error('Unexpected response shape from the model Space.');
-  return data;
+  if (!lastData) throw new Error('No result received from the model Space (empty event stream).');
+
+  let parsed;
+  try {
+    parsed = JSON.parse(lastData);
+  } catch {
+    throw new Error('Could not parse the model Space\'s response.');
+  }
+
+  if (sawError) {
+    throw new Error(Array.isArray(parsed) ? String(parsed[0]) : 'Space returned an error.');
+  }
+
+  // Gradio wraps the function's return value as the first element of the
+  // final "data" array. hf-space/app.py's predict() returns either
+  // { scores: [...] } or { error: "..." } (its JSON output component).
+  const output = Array.isArray(parsed) ? parsed[0] : null;
+  if (!output) throw new Error('Unexpected response shape from the model Space.');
+  if (output.error) throw new Error(output.error);
+  if (!Array.isArray(output.scores)) throw new Error('Unexpected response shape from the model Space.');
+  return output.scores;
 }
 
 function interpretScores(scores) {
