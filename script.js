@@ -134,28 +134,79 @@ function verdictMeta(verdict) {
     return VERDICT_META[verdict] || { label: verdict, badgeText: verdict, bg: '#cbd5e0', fg: '#4a5568' };
 }
 
-// Main verdict banner at the top of the results card
-function renderBanner(result) {
+// Whether the model's own prediction and the LLM's official-source recheck
+// actually agree - lets the banner say plainly whether Step 2 backed up or
+// undercut Step 1, rather than just showing two badges side by side.
+function computeAgreement(modelResult, officialResult) {
+    if (!modelResult || modelResult.verdict === 'unavailable') return 'inconclusive';
+    if (!officialResult || officialResult.verdict === 'unverified' || officialResult.verdict === 'unavailable') return 'inconclusive';
+
+    const modelSaysFake = modelResult.verdict === 'fake';
+    const modelSaysReal = modelResult.verdict === 'real';
+    const llmSaysFake = officialResult.verdict === 'contradicted';
+    const llmSaysReal = officialResult.verdict === 'supported';
+
+    if ((modelSaysFake && llmSaysFake) || (modelSaysReal && llmSaysReal)) return 'agree';
+    return 'disagree';
+}
+
+const AGREEMENT_META = {
+    agree: {
+        label: "✅ Official sources CONFIRM your model's prediction",
+        bg: '#c6f6d5',
+        fg: '#22543d'
+    },
+    disagree: {
+        label: "⚠️ Official sources CONTRADICT your model's prediction",
+        bg: '#fed7d7',
+        fg: '#9b2c2c'
+    },
+    inconclusive: {
+        label: '❓ Official sources are inconclusive - model verdict stands alone',
+        bg: '#feebc8',
+        fg: '#7b341e'
+    }
+};
+
+// Main verdict banner at the top of the results card - tells the two-step
+// story: Step 1 is your trained model's own call on the text, Step 2 is the
+// LLM independently rechecking the article against official sources. The
+// agreement badge compares the two rather than just listing them side by side.
+function renderBanner(officialResult, modelResult) {
     const banner = document.getElementById('resultBanner');
-    const meta = verdictMeta(result.verdict);
-    const confidencePct = typeof result.confidence === 'number'
-        ? Math.round(result.confidence * 100)
+    const officialMeta = verdictMeta(officialResult.verdict);
+    const officialConfidencePct = typeof officialResult.confidence === 'number'
+        ? Math.round(officialResult.confidence * 100)
         : null;
+
+    const modelMeta = MODEL_VERDICT_META[modelResult ? modelResult.verdict : 'unavailable'] || MODEL_VERDICT_META.unavailable;
+    const modelConfidencePct = modelResult && typeof modelResult.confidence === 'number'
+        ? Math.round(modelResult.confidence * 100)
+        : null;
+
+    const agreementMeta = AGREEMENT_META[computeAgreement(modelResult, officialResult)];
 
     banner.innerHTML = `
         <div style="text-align: center;">
-            <div class="prediction-badge" style="background:${meta.bg};color:${meta.fg};font-size:1.8rem;padding:0.75rem 2rem;margin-bottom:1rem;">
-                ${meta.label}
+            <div style="font-size:0.8rem;color:#a0aec0;text-transform:uppercase;letter-spacing:0.05em;margin-bottom:0.5rem;">Step 1 &middot; Your Trained Model</div>
+            <div class="prediction-badge" style="background:${modelMeta.bg};color:${modelMeta.fg};font-size:1.3rem;">
+                ${modelMeta.label}
             </div>
-            ${confidencePct !== null ? `<div style="font-size:1.2rem;font-weight:600;">Confidence: ${confidencePct}%</div>` : ''}
-            ${confidencePct !== null ? `
-                <div style="margin-top:1rem;">
-                    <div style="background:#e2e8f0;border-radius:10px;height:12px;width:80%;margin:0 auto;">
-                        <div style="background:${meta.bg};width:${confidencePct}%;height:12px;border-radius:10px;"></div>
-                    </div>
-                </div>
-            ` : ''}
-            <p style="max-width:600px;margin:1rem auto 0;color:#4a5568;">${escapeHtml(result.summary || '')}</p>
+            ${modelConfidencePct !== null ? `<div style="font-size:0.9rem;color:#4a5568;margin-top:0.25rem;">${modelConfidencePct}% confidence</div>` : ''}
+
+            <div style="margin:1rem 0;color:#cbd5e0;font-size:1.4rem;">&darr;</div>
+
+            <div style="font-size:0.8rem;color:#a0aec0;text-transform:uppercase;letter-spacing:0.05em;margin-bottom:0.5rem;">Step 2 &middot; LLM Recheck Against Official Sources</div>
+            <div class="prediction-badge" style="background:${officialMeta.bg};color:${officialMeta.fg};font-size:1.3rem;">
+                ${officialMeta.label}
+            </div>
+            ${officialConfidencePct !== null ? `<div style="font-size:0.9rem;color:#4a5568;margin-top:0.25rem;">${officialConfidencePct}% confidence</div>` : ''}
+
+            <div class="prediction-badge" style="background:${agreementMeta.bg};color:${agreementMeta.fg};margin-top:1.25rem;font-size:0.95rem;">
+                ${agreementMeta.label}
+            </div>
+
+            <p style="max-width:600px;margin:1rem auto 0;color:#4a5568;">${escapeHtml(officialResult.summary || '')}</p>
         </div>
     `;
 }
@@ -528,7 +579,7 @@ function displayResults(text, officialResult, modelResult) {
     const resultsCard = document.getElementById('resultsCard');
     resultsCard.style.display = 'block';
 
-    renderBanner(officialResult);
+    renderBanner(officialResult, modelResult);
     renderOfficialCheck(officialResult);
     renderModelPrediction(modelResult);
     renderTextAnalysis(text);
@@ -551,18 +602,22 @@ async function predictNews() {
     }
 
     const loadingOverlay = document.getElementById('loadingOverlay');
+    const loadingText = document.getElementById('loadingText');
     loadingOverlay.style.display = 'flex';
     const predictBtn = document.getElementById('predictBtn');
     predictBtn.disabled = true;
 
     try {
-        // Run the official-source check and your trained model in parallel -
-        // they're independent, so no reason to wait on one before starting
-        // the other.
-        const [officialResult, modelResult] = await Promise.all([
-            verifyOfficialSources(text),
-            getModelPrediction(text)
-        ]);
+        // Two-step pipeline, run in sequence rather than in parallel: your
+        // trained model makes the first call on the text, then the LLM
+        // independently rechecks it against official sources. renderBanner
+        // compares the two rather than treating them as unrelated tabs.
+        if (loadingText) loadingText.textContent = 'Step 1/2: Running your trained model...';
+        const modelResult = await getModelPrediction(text);
+
+        if (loadingText) loadingText.textContent = 'Step 2/2: Rechecking against BBC Health, KKM, WHO and CDC...';
+        const officialResult = await verifyOfficialSources(text);
+
         loadingOverlay.style.display = 'none';
         predictBtn.disabled = false;
         displayResults(text, officialResult, modelResult);

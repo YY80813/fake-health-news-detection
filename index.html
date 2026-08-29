@@ -129,8 +129,8 @@ Example:
                 <div id="loadingOverlay" class="loading-overlay">
                     <div class="loading-card">
                         <div class="spinner"></div>
-                        <h3>Checking Official Sources</h3>
-                        <p id="loadingText">Searching BBC Health, KKM, WHO and CDC, and running your trained model...</p>
+                        <h3>Analyzing Article</h3>
+                        <p id="loadingText">Step 1/2: Running your trained model...</p>
                         <div class="loading-progress">
                             <div class="progress-bar" id="progressBar"></div>
                         </div>
@@ -224,7 +224,7 @@ Example:
                 <div class="about-grid">
                     <div class="about-card">
                         <h4>🤖 How It Works</h4>
-                        <p>Your submitted article is sent to an LLM (Claude) with a web-search tool. The LLM searches trusted official domains and returns a verdict on whether your article's claims are supported or contradicted</p>
+                        <p>Two-step pipeline: your fine-tuned PubMedBERT model classifies the article first, then an LLM independently rechecks it against official sources — the top banner shows whether the recheck confirms or contradicts your model's call</p>
                     </div>
                     <div class="about-card">
                         <h4>🌐 Official Source Check</h4>
