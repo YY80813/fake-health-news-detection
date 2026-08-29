@@ -10,9 +10,10 @@ the page source):
   an OpenAI API key.
 - `api/news.js` — the small "Latest from Official Health Sources" panel.
   Needs **no key at all** — it just fetches public RSS feeds server-side.
-- `api/predict.js` — the "Your Model" tab, running your fine-tuned
-  PubMedBERT model via Hugging Face's Inference API. Needs a Hugging Face
-  access token and your model's repo ID (see the dedicated section below).
+- `api/predict.js` — the "Your Model" tab, calling a Hugging Face Space
+  (which you deploy yourself - see `hf-space/README.md`) that runs your
+  fine-tuned PubMedBERT model directly. Needs that Space's URL (see the
+  dedicated section below).
 
 ## Fastest path: Vercel (free tier is enough for a FYP demo)
 
@@ -22,10 +23,9 @@ the page source):
    functions — no config needed.
 3. In the Vercel project's **Settings → Environment Variables**, add:
    - `OPENAI_API_KEY` = your key from https://platform.openai.com/api-keys
-   - `HF_API_TOKEN` and `HF_MODEL_REPO` — see "Connecting your trained
-     PubMedBERT model" below. The site still works without these two (the
-     "Your Model" tab just shows "Model unavailable"), so you can add them
-     later.
+   - `HF_SPACE_URL` — see "Connecting your trained PubMedBERT model" below.
+     The site still works without it (the "Your Model" tab just shows
+     "Model unavailable"), so you can add it later.
 4. Deploy (or Redeploy, if you already deployed before adding the key —
    env vars only apply to deployments made *after* they're set).
 
@@ -97,9 +97,15 @@ PubMedBERT) and found **PubMedBERT** gave the best trade-off for this task
 (fake-class F1 of 0.61, per `FYP1_LawYingYee.docx` Section 5.6) — that's the
 one wired up here. It only ever existed as checkpoints inside the Colab
 session that trained it, so it needs to be published somewhere with a
-callable API before this website can use it. The path below (Hugging Face
-Hub + their free serverless Inference API) avoids standing up your own
-server, and keeps the model weights (~440MB) out of this git repo entirely.
+callable API before this website can use it.
+
+**Why not Hugging Face's free Inference API directly?** That was the first
+approach tried here, but it only serves a curated allow-list of "warm"
+models — a custom fine-tuned checkpoint like this one gets rejected with
+`"Model not supported by provider hf-inference"`. The fix: run the model
+yourself in a **Hugging Face Space** (their free CPU tier gives 16GB RAM —
+plenty for a BERT-base model), using the small FastAPI app already set up
+for you in this repo's `hf-space/` folder.
 
 **1. Push the model to Hugging Face Hub**, from the end of
 `FYP_pubmedbert_finetuned.ipynb` (right after `trainer.train()`, so the
@@ -124,40 +130,58 @@ model.push_to_hub(REPO_ID)
 tokenizer.push_to_hub(REPO_ID)
 ```
 
-You'll need a (free) Hugging Face account for this. The repo can be public
-or private — if private, the `HF_API_TOKEN` used by `api/predict.js` (step 3
-below) needs at least read access to it.
+You'll need a (free) Hugging Face account for this. If you already did this
+step earlier, no need to redo it — the model repo itself doesn't change,
+only how it gets served does.
 
-**2. Create an inference-capable access token**: 
-https://huggingface.co/settings/tokens → "New token" → type "Read" is
-enough for a public repo (or a fine-grained token scoped to "Read access to
-contents of all public gated repos you can access" + your repo, if private).
+**2. Create a Hugging Face Space**: go to https://huggingface.co/new-space →
+give it a name → **SDK: Docker** → **Hardware: CPU basic (free)** → Create
+Space.
 
-**3. Set environment variables** in your deployment platform (Vercel:
-Settings → Environment Variables), same as `OPENAI_API_KEY`:
-   - `HF_API_TOKEN` = the token from step 2
-   - `HF_MODEL_REPO` = the `REPO_ID` you used in step 1 (e.g.
-     `yourname/pubmedbert-fake-health-news`)
+**3. Upload the Space's files**: from this repo's `hf-space/` folder, upload
+`Dockerfile`, `app.py`, `requirements.txt`, and `README.md` to the new
+Space — either via its "Files" tab's upload button, or by cloning the
+Space's own git repo (Hugging Face gives every Space a git remote, shown on
+its page) and pushing them there.
 
-**4. Deploy (or redeploy)**. The "Your Model" tab calls `POST /api/predict`,
-which forwards the text to
-`https://router.huggingface.co/hf-inference/models/<HF_MODEL_REPO>` and
-returns a fake/real verdict with a confidence score.
+**4. Set the model repo on the Space**: in the Space's **Settings →
+Variables and secrets**, add a variable `MODEL_REPO` = the `REPO_ID` from
+step 1 (e.g. `your-hf-username/pubmedbert-fake-health-news`). Alternatively,
+edit the default value directly in `app.py` before uploading it.
+
+**5. Wait for the build**, watching the Space's "Logs" tab — the first
+build downloads and installs PyTorch, so it can take several minutes. Once
+it says "Running", the Space's URL follows the pattern
+`https://<your-username>-<space-name>.hf.space` (shown on the Space's page).
+Test it works by visiting `<that-url>/docs` (FastAPI's built-in Swagger UI)
+and trying the `/predict` endpoint with some sample text there directly.
+
+**6. Set the environment variable** on your website's deployment platform
+(Vercel: Settings → Environment Variables), same as `OPENAI_API_KEY`:
+   - `HF_SPACE_URL` = the Space URL from step 5
+
+**7. Deploy (or redeploy)**. The "Your Model" tab calls `POST /api/predict`,
+which forwards the text to `POST <HF_SPACE_URL>/predict` and returns a
+fake/real verdict with a confidence score.
 
 **Notes:**
-- **Cold starts**: Hugging Face's free Inference API spins down models that
-  haven't been called in a while. The first request after some idle time can
-  take 10–30 seconds while it spins back up — `api/predict.js` already
-  retries through this (up to 3 attempts, honoring HF's `estimated_time`),
+- **Cold starts**: free Spaces "sleep" after a period of inactivity, same
+  idea as the Inference API's cold starts. The first request after a while
+  can take 20–60 seconds while the container wakes up and reloads the model
+  into memory — `api/predict.js` already waits up to 60 seconds for this,
   so you don't need to do anything, just expect that first request to be
   slow.
 - **This tab is independent of the Official Source Check.** It's your own
   classifier's opinion on the text itself, not filtered through official
   sources — the two can (and sometimes will) disagree, which is expected
-  and worth pointing out in your FYP write-up/demo.
+  and worth pointing out in your FYP write-up/demo (the top verdict banner
+  now says explicitly whether they agree or not).
+- If a request to `/api/predict` fails after deploying, check the Space's
+  own **Logs** tab first — a crash or build failure there (e.g. a typo in
+  `MODEL_REPO`) means the request never reaches `api/predict.js`'s own error
+  handling at all.
 - If you'd rather try DistilBERT, BioBERT, or the GloVe+SVC baseline
-  instead, the same steps work for the transformer notebooks (just point
-  `REPO_ID` at a different repo and swap which notebook you push from) — the
-  GloVe+SVC baseline isn't a Hugging Face model though, so it would need a
-  different hosting approach (e.g. a small custom inference server) rather
-  than this exact recipe.
+  instead, the same Space recipe works for the transformer notebooks (push
+  a different model repo in step 1, point `MODEL_REPO` at it in step 4) —
+  the GloVe+SVC baseline would need `app.py` adjusted since it isn't a
+  Hugging Face transformers model.
