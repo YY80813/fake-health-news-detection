@@ -130,7 +130,7 @@ Example:
                     <div class="loading-card">
                         <div class="spinner"></div>
                         <h3>Checking Official Sources</h3>
-                        <p id="loadingText">Searching BBC Health, KKM, WHO and CDC for related coverage...</p>
+                        <p id="loadingText">Searching BBC Health, KKM, WHO and CDC, and running your trained model...</p>
                         <div class="loading-progress">
                             <div class="progress-bar" id="progressBar"></div>
                         </div>
@@ -145,6 +145,7 @@ Example:
                     <!-- Tabs -->
                     <div class="tabs">
                         <button class="tab-btn active" data-tab="official">🌐 Official Check</button>
+                        <button class="tab-btn" data-tab="model">🤖 Your Model</button>
                         <button class="tab-btn" data-tab="analysis">🔬 Text Analysis</button>
                         <button class="tab-btn" data-tab="history">📜 History</button>
                     </div>
@@ -152,6 +153,11 @@ Example:
                     <!-- Official Source Check Tab -->
                     <div id="officialTab" class="tab-content active">
                         <div id="officialContent"></div>
+                    </div>
+
+                    <!-- Your Trained Model Tab -->
+                    <div id="modelTab" class="tab-content">
+                        <div id="modelContent"></div>
                     </div>
 
                     <!-- Analysis Tab -->
@@ -227,6 +233,10 @@ Example:
                     <div class="about-card">
                         <h4>📎 Cited Evidence</h4>
                         <p>Every verdict comes with links to the specific official pages the model used, so you can check the sources yourself</p>
+                    </div>
+                    <div class="about-card">
+                        <h4>🤖 Your Trained Model</h4>
+                        <p>A PubMedBERT model fine-tuned on the HealthStory dataset (see the "Your Model" tab) runs alongside the LLM check and gives its own fake/real prediction with a confidence score</p>
                     </div>
                     <div class="about-card">
                         <h4>⚠️ Disclaimer</h4>

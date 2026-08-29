@@ -621,10 +621,44 @@ body {
     color: #4a5568;
 }
 
+/* Your Trained Model tab reuses the verdict-badge look with its own
+   fake/real states (kept visually distinct from supported/contradicted so
+   it's clear this is the model's own opinion, not the official check) */
+.verdict-badge.fake {
+    background: #fed7d7;
+    color: #9b2c2c;
+}
+
+.verdict-badge.real {
+    background: #c6f6d5;
+    color: #22543d;
+}
+
 .official-summary {
     margin-top: 1rem;
     color: #4a5568;
     font-size: 0.95rem;
+}
+
+.model-confidence-bar {
+    background: #e2e8f0;
+    border-radius: 10px;
+    height: 12px;
+    width: 100%;
+    max-width: 400px;
+    margin-top: 0.75rem;
+    overflow: hidden;
+}
+
+.model-confidence-fill {
+    height: 100%;
+    border-radius: 10px;
+}
+
+.model-confidence-label {
+    font-size: 0.85rem;
+    color: #718096;
+    margin-top: 0.4rem;
 }
 
 .source-list {

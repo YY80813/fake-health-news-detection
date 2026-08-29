@@ -26,6 +26,11 @@ let predictionHistory = [];
 // api/news.js). Same same-origin-by-default convention as VERIFY_API_URL.
 const NEWS_API_URL = '/api/news';
 
+// Where "Your Model" tab gets its prediction from (see api/predict.js) - the
+// PubMedBERT model fine-tuned in this project's notebooks, hosted on
+// Hugging Face Hub and called through HF's serverless Inference API.
+const MODEL_API_URL = '/api/predict';
+
 // Initialize tabs
 document.addEventListener('DOMContentLoaded', () => {
     initTabs();
@@ -51,6 +56,8 @@ function initTabs() {
 
             if (tabId === 'official') {
                 document.getElementById('officialTab').classList.add('active');
+            } else if (tabId === 'model') {
+                document.getElementById('modelTab').classList.add('active');
             } else if (tabId === 'analysis') {
                 document.getElementById('analysisTab').classList.add('active');
             } else if (tabId === 'history') {
@@ -180,6 +187,80 @@ function renderOfficialCheck(result) {
                 </div>
             ` : '<p style="color:#718096;font-size:0.9rem;margin-top:1rem;">No matching pages were found on BBC, KKM, WHO or CDC.</p>'}
             ${result.raw ? `<details style="margin-top:1rem;"><summary style="cursor:pointer;color:#718096;font-size:0.85rem;">Raw model output</summary><pre style="white-space:pre-wrap;font-size:0.8rem;color:#4a5568;">${escapeHtml(result.raw)}</pre></details>` : ''}
+        </div>
+    `;
+}
+
+// ============================================================================
+// Your Trained Model (PubMedBERT, fine-tuned in this project's notebooks,
+// served from Hugging Face Hub via api/predict.js)
+// ============================================================================
+
+async function getModelPrediction(text) {
+    try {
+        const response = await fetch(MODEL_API_URL, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ text })
+        });
+
+        if (!response.ok) {
+            const errBody = await response.json().catch(() => ({}));
+            throw new Error(errBody.error || `Request failed (${response.status})`);
+        }
+
+        return await response.json();
+    } catch (err) {
+        // Most likely cause during development: api/predict.js isn't deployed
+        // yet, or HF_API_TOKEN / HF_MODEL_REPO aren't set on the backend.
+        return {
+            verdict: 'unavailable',
+            confidence: null,
+            summary: 'Could not reach your trained model. Make sure api/predict.js is deployed ' +
+                     'and HF_API_TOKEN / HF_MODEL_REPO are set on the backend. Details: ' + err.message
+        };
+    }
+}
+
+const MODEL_VERDICT_META = {
+    fake: {
+        label: '⚠️ Your model says: FAKE',
+        bg: '#fc8181',
+        fg: '#742a2a'
+    },
+    real: {
+        label: '✅ Your model says: REAL',
+        bg: '#68d391',
+        fg: '#22543d'
+    },
+    unavailable: {
+        label: '⚙️ Model unavailable',
+        bg: '#cbd5e0',
+        fg: '#4a5568'
+    }
+};
+
+function renderModelPrediction(result) {
+    const container = document.getElementById('modelContent');
+    if (!result) {
+        container.innerHTML = '<div style="text-align:center;padding:2rem;color:#718096;">No model prediction available.</div>';
+        return;
+    }
+
+    const meta = MODEL_VERDICT_META[result.verdict] || MODEL_VERDICT_META.unavailable;
+    const confidencePct = typeof result.confidence === 'number' ? Math.round(result.confidence * 100) : null;
+
+    container.innerHTML = `
+        <div class="official-check">
+            <div class="verdict-badge ${result.verdict}">${meta.label}</div>
+            <p class="official-summary">${result.summary ? escapeHtml(result.summary) : 'No summary returned.'}</p>
+            ${confidencePct !== null ? `
+                <div class="model-confidence-bar">
+                    <div class="model-confidence-fill" style="width:${confidencePct}%;background:${meta.bg};"></div>
+                </div>
+                <div class="model-confidence-label">Model confidence: ${confidencePct}%</div>
+            ` : ''}
+            <p style="margin-top:1.5rem;font-size:0.8rem;color:#a0aec0;">This is your fine-tuned PubMedBERT model's own prediction — independent of, and not filtered by, the Official Source Check above.</p>
         </div>
     `;
 }
@@ -371,7 +452,7 @@ function resetStats() {
 // History
 // ============================================================================
 
-function saveToHistory(text, result) {
+function saveToHistory(text, result, modelResult) {
     const historyItem = {
         id: Date.now(),
         text: text.substring(0, 150) + (text.length > 150 ? '...' : ''),
@@ -379,6 +460,8 @@ function saveToHistory(text, result) {
         verdict: result.verdict,
         confidence: result.confidence,
         summary: result.summary,
+        modelVerdict: modelResult ? modelResult.verdict : null,
+        modelConfidence: modelResult ? modelResult.confidence : null,
         timestamp: new Date().toLocaleString()
     };
 
@@ -407,6 +490,8 @@ function renderHistory() {
             ${predictionHistory.map(item => {
                 const meta = verdictMeta(item.verdict);
                 const confidencePct = typeof item.confidence === 'number' ? Math.round(item.confidence * 100) : null;
+                const modelMeta = item.modelVerdict ? (MODEL_VERDICT_META[item.modelVerdict] || MODEL_VERDICT_META.unavailable) : null;
+                const modelConfidencePct = typeof item.modelConfidence === 'number' ? Math.round(item.modelConfidence * 100) : null;
                 return `
                 <div class="history-item">
                     <div class="history-text">
@@ -418,6 +503,14 @@ function renderHistory() {
                             ${meta.badgeText}
                         </span>
                         ${confidencePct !== null ? `<div style="font-size: 0.75rem; margin-top: 0.25rem;">${confidencePct}% confidence</div>` : ''}
+                        ${modelMeta ? `
+                            <div style="margin-top: 0.5rem;">
+                                <span class="prediction-badge" style="background:${modelMeta.bg};color:${modelMeta.fg};font-size:0.8rem;padding:0.35rem 1rem;">
+                                    ${modelMeta.label}
+                                </span>
+                                ${modelConfidencePct !== null ? `<div style="font-size: 0.7rem; margin-top: 0.2rem;">${modelConfidencePct}% confidence</div>` : ''}
+                            </div>
+                        ` : ''}
                     </div>
                 </div>
             `;}).join('')}
@@ -429,14 +522,15 @@ function renderHistory() {
 // Main flow
 // ============================================================================
 
-function displayResults(text, officialResult) {
-    saveToHistory(text, officialResult);
+function displayResults(text, officialResult, modelResult) {
+    saveToHistory(text, officialResult, modelResult);
 
     const resultsCard = document.getElementById('resultsCard');
     resultsCard.style.display = 'block';
 
     renderBanner(officialResult);
     renderOfficialCheck(officialResult);
+    renderModelPrediction(modelResult);
     renderTextAnalysis(text);
     updateStats(officialResult);
 
@@ -462,10 +556,16 @@ async function predictNews() {
     predictBtn.disabled = true;
 
     try {
-        const officialResult = await verifyOfficialSources(text);
+        // Run the official-source check and your trained model in parallel -
+        // they're independent, so no reason to wait on one before starting
+        // the other.
+        const [officialResult, modelResult] = await Promise.all([
+            verifyOfficialSources(text),
+            getModelPrediction(text)
+        ]);
         loadingOverlay.style.display = 'none';
         predictBtn.disabled = false;
-        displayResults(text, officialResult);
+        displayResults(text, officialResult, modelResult);
     } catch (err) {
         loadingOverlay.style.display = 'none';
         predictBtn.disabled = false;
