@@ -96,10 +96,12 @@ module.exports = async function handler(req, res) {
     const result = interpretScores(scores);
     res.status(200).json(result);
   } catch (err) {
+    // NOTE: the front end's getModelPrediction() reads `error` from a
+    // non-ok response (same convention as api/verify.js) - use that key
+    // here, not `summary`, or the real reason gets swallowed and replaced
+    // with a generic "Request failed (502)" on the front end.
     res.status(502).json({
-      verdict: 'unavailable',
-      confidence: null,
-      summary: 'Could not reach your trained model: ' + err.message
+      error: 'Could not reach your trained model: ' + err.message
     });
   }
 };
