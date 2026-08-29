@@ -142,16 +142,30 @@ body {
     padding: 2rem;
 }
 
-/* Detector layout (sidebar + main column) */
+/* Detector layout (left sidebar + main column + right panel) */
 .detector-layout {
     display: grid;
-    grid-template-columns: 280px 1fr;
+    grid-template-columns: 260px minmax(0, 1fr) 300px;
     align-items: start;
     gap: 1.5rem;
 }
 
 .detector-main {
     min-width: 0;
+}
+
+.news-sidebar {
+    position: sticky;
+    top: 90px;
+    min-width: 0;
+}
+
+.news-sidebar .news-panel {
+    margin-bottom: 0;
+}
+
+.news-sidebar .news-panel-content {
+    max-height: 640px;
 }
 
 /* Official Health Sources Sidebar */
@@ -829,8 +843,13 @@ body {
         grid-template-columns: 1fr;
     }
 
-    .source-sidebar {
+    .source-sidebar,
+    .news-sidebar {
         position: static;
+    }
+
+    .news-sidebar .news-panel-content {
+        max-height: 260px;
     }
 
     .source-list {

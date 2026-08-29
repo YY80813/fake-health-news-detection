@@ -32,6 +32,11 @@ const FEEDS = [
 const MAX_ITEMS_PER_FEED = 5;
 const MAX_TOTAL_ITEMS = 8;
 
+// Only show headlines published within this many days ("1 month" threshold).
+// Anything older — or with a date we can't parse, so we can't confirm it's
+// recent — is dropped rather than shown.
+const MAX_AGE_DAYS = 30;
+
 function extractTag(xml, tag) {
   const match = xml.match(new RegExp(`<${tag}[^>]*>([\\s\\S]*?)</${tag}>`, 'i'));
   if (!match) return '';
@@ -97,6 +102,14 @@ module.exports = async function handler(req, res) {
   try {
     const results = await Promise.all(FEEDS.map(fetchFeed));
     let items = results.flat();
+
+    // Recency threshold: drop anything older than MAX_AGE_DAYS (or with no
+    // parseable date, since we can't confirm it's within the window).
+    const cutoff = Date.now() - MAX_AGE_DAYS * 24 * 60 * 60 * 1000;
+    items = items.filter((item) => {
+      const t = item.pubDate ? Date.parse(item.pubDate) : NaN;
+      return !isNaN(t) && t >= cutoff;
+    });
 
     // Sort newest-first when pubDate parses cleanly; items without a valid
     // date sink to the end rather than breaking the sort.
