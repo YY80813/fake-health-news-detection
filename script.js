@@ -263,12 +263,12 @@ async function getModelPrediction(text) {
         return await response.json();
     } catch (err) {
         // Most likely cause during development: api/predict.js isn't deployed
-        // yet, or HF_API_TOKEN / HF_MODEL_REPO aren't set on the backend.
+        // yet, or HF_SPACE_URL isn't set on the backend (see hf-space/README.md).
         return {
             verdict: 'unavailable',
             confidence: null,
             summary: 'Could not reach your trained model. Make sure api/predict.js is deployed ' +
-                     'and HF_API_TOKEN / HF_MODEL_REPO are set on the backend. Details: ' + err.message
+                     'and HF_SPACE_URL is set on the backend. Details: ' + err.message
         };
     }
 }
