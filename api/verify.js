@@ -140,6 +140,15 @@ module.exports = async function handler(req, res) {
         instructions: SYSTEM_PROMPT,
         input: `Submitted article:\n\n"""${text}"""`,
         tools: [{ type: 'web_search' }],
+        // Force the model to actually call web_search rather than silently
+        // answering from its own training knowledge. Left as the default
+        // "auto", the model can (and did, in testing) skip the tool
+        // entirely for claims it already "knows" the answer to - producing
+        // no url_citation annotations at all, which the safety-net check
+        // below then reports as "unverified" even when the underlying fact
+        // is one WHO/CDC/BBC/KKM plainly document. "required" forces at
+        // least one tool call per OpenAI's standard tool-calling contract.
+        tool_choice: 'required',
         temperature: 0.2
       })
     });
