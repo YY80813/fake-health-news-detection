@@ -134,39 +134,96 @@ function verdictMeta(verdict) {
     return VERDICT_META[verdict] || { label: verdict, badgeText: verdict, bg: '#cbd5e0', fg: '#4a5568' };
 }
 
-// Whether the model's own prediction and the LLM's official-source recheck
-// actually agree - lets the banner say plainly whether Step 2 backed up or
-// undercut Step 1, rather than just showing two badges side by side.
-function computeAgreement(modelResult, officialResult) {
-    if (!modelResult || modelResult.verdict === 'unavailable') return 'inconclusive';
-    if (!officialResult || officialResult.verdict === 'unverified' || officialResult.verdict === 'unavailable') return 'inconclusive';
+// Resolves the model's own prediction and the LLM's official-source recheck
+// into a single final conclusion, rather than just showing two badges and
+// leaving the visitor to guess which one to believe. The decision policy:
+//
+//   1. If official sources return an actual citation (supported/contradicted),
+//      that citation outweighs the model's prediction whenever the two
+//      disagree - a cited, checkable source is stronger evidence than a
+//      classifier's pattern-based guess, however confident that guess is.
+//   2. If both agree, that's the strongest possible combined signal.
+//   3. If official sources come back "unverified" (no matching official
+//      coverage either way), fall back to the model's own call, but labelled
+//      as unconfirmed rather than a flat, confident verdict - leaning fake
+//      under uncertainty matches this project's own training philosophy
+//      (failing to flag misleading health content is costlier than an
+//      occasional false alarm), while leaning real under uncertainty is
+//      intentionally still hedged as "unconfirmed" rather than a clean
+//      "real", so silence from official sources never reads as a guarantee.
+//   4. If one side genuinely couldn't be reached, fall back to whichever
+//      side did respond, flagged as single-source rather than combined.
+function computeFinalConclusion(modelResult, officialResult) {
+    const modelVerdict = modelResult ? modelResult.verdict : 'unavailable';
+    const officialVerdict = officialResult ? officialResult.verdict : 'unavailable';
 
-    const modelSaysFake = modelResult.verdict === 'fake';
-    const modelSaysReal = modelResult.verdict === 'real';
-    const llmSaysFake = officialResult.verdict === 'contradicted';
-    const llmSaysReal = officialResult.verdict === 'supported';
+    const modelSaysFake = modelVerdict === 'fake';
+    const modelSaysReal = modelVerdict === 'real';
+    const modelResponded = modelSaysFake || modelSaysReal;
 
-    if ((modelSaysFake && llmSaysFake) || (modelSaysReal && llmSaysReal)) return 'agree';
-    return 'disagree';
-}
+    const officialSaysReal = officialVerdict === 'supported';
+    const officialSaysFake = officialVerdict === 'contradicted';
+    const officialHasCitation = officialSaysReal || officialSaysFake;
 
-const AGREEMENT_META = {
-    agree: {
-        label: "✅ Official sources CONFIRM your model's prediction",
-        bg: '#c6f6d5',
-        fg: '#22543d'
-    },
-    disagree: {
-        label: "⚠️ Official sources CONTRADICT your model's prediction",
-        bg: '#fed7d7',
-        fg: '#9b2c2c'
-    },
-    inconclusive: {
-        label: '❓ Official sources are inconclusive - model verdict stands alone',
-        bg: '#feebc8',
-        fg: '#7b341e'
+    // Neither system produced a usable verdict.
+    if (!modelResponded && !officialHasCitation) {
+        return {
+            label: '⚙️ Unable to Assess',
+            explanation: 'Both your trained model and the official-source check were unavailable for this article, so no conclusion could be reached.',
+            bg: '#e2e8f0', fg: '#4a5568'
+        };
     }
-};
+
+    // Official sources found a direct citation - that wins on disagreement,
+    // and reinforces agreement.
+    if (officialHasCitation && modelResponded) {
+        if (modelSaysFake && officialSaysFake) {
+            return {
+                label: '⚠️ Fake News — Confirmed',
+                explanation: "Your model and an independently cited official source both indicate this article is fake.",
+                bg: '#fc8181', fg: '#742a2a'
+            };
+        }
+        if (modelSaysReal && officialSaysReal) {
+            return {
+                label: '✅ Real News — Confirmed',
+                explanation: 'Your model and an independently cited official source both confirm this article is real.',
+                bg: '#68d391', fg: '#22543d'
+            };
+        }
+        if (modelSaysFake && officialSaysReal) {
+            return {
+                label: '✅ Real News — Official Sources Override the Model',
+                explanation: "Your model flagged this as fake, but a cited official source confirms it. A direct, checkable citation outweighs the model's own pattern-based prediction, so this is concluded as real.",
+                bg: '#68d391', fg: '#22543d'
+            };
+        }
+        // modelSaysReal && officialSaysFake
+        return {
+            label: '⚠️ Fake News — Official Sources Override the Model',
+            explanation: "Your model found no red flags, but a cited official source contradicts this claim. A direct, checkable citation outweighs the model's own pattern-based prediction, so this is concluded as fake.",
+            bg: '#fc8181', fg: '#742a2a'
+        };
+    }
+
+    // Official sources responded but found nothing either way - fall back to
+    // the model, but hedge the label since nothing official backs it up.
+    if (!officialHasCitation && modelResponded) {
+        if (officialVerdict === 'unavailable') {
+            return modelSaysFake
+                ? { label: '⚠️ Likely Fake (Model Only)', explanation: 'The official-source check was unavailable for this article, so this call rests on your trained model alone.', bg: '#fbd38d', fg: '#7b341e' }
+                : { label: '✅ Likely Real (Model Only)', explanation: 'The official-source check was unavailable for this article, so this call rests on your trained model alone.', bg: '#c6f6d5', fg: '#22543d' };
+        }
+        return modelSaysFake
+            ? { label: '⚠️ Likely Fake (Unconfirmed)', explanation: 'Your model flagged this as fake, and no official source addressed the claim either way. Treated as likely fake out of caution, since missing real misinformation is costlier than a false alarm.', bg: '#fbd38d', fg: '#7b341e' }
+            : { label: '✅ Likely Real (Unconfirmed)', explanation: "Your model found no red flags, and no official source contradicted the claim - but none confirmed it either, so this is unconfirmed rather than fully verified.", bg: '#e9d8fd', fg: '#553c9a' };
+    }
+
+    // Model was unavailable but official sources returned a citation.
+    return officialSaysReal
+        ? { label: '✅ Real News (Official Sources Only)', explanation: 'Your trained model was unavailable for this article, so this verdict comes directly from a cited official source.', bg: '#68d391', fg: '#22543d' }
+        : { label: '⚠️ Fake News (Official Sources Only)', explanation: 'Your trained model was unavailable for this article, so this verdict comes directly from a cited official source that contradicts the claim.', bg: '#fc8181', fg: '#742a2a' };
+}
 
 // Main verdict banner at the top of the results card - tells the two-step
 // story: Step 1 is your trained model's own call on the text, Step 2 is the
@@ -184,29 +241,37 @@ function renderBanner(officialResult, modelResult) {
         ? Math.round(modelResult.confidence * 100)
         : null;
 
-    const agreementMeta = AGREEMENT_META[computeAgreement(modelResult, officialResult)];
+    const conclusion = computeFinalConclusion(modelResult, officialResult);
 
     banner.innerHTML = `
         <div style="text-align: center;">
-            <div style="font-size:0.8rem;color:#a0aec0;text-transform:uppercase;letter-spacing:0.05em;margin-bottom:0.5rem;">Step 1 &middot; Your Trained Model</div>
-            <div class="prediction-badge" style="background:${modelMeta.bg};color:${modelMeta.fg};font-size:1.3rem;">
-                ${modelMeta.label}
+            <div style="font-size:0.8rem;color:#a0aec0;text-transform:uppercase;letter-spacing:0.05em;margin-bottom:0.5rem;">Final Conclusion</div>
+            <div class="prediction-badge" style="background:${conclusion.bg};color:${conclusion.fg};font-size:1.5rem;padding:0.75rem 1.5rem;">
+                ${conclusion.label}
             </div>
-            ${modelConfidencePct !== null ? `<div style="font-size:0.9rem;color:#4a5568;margin-top:0.25rem;">${modelConfidencePct}% confidence</div>` : ''}
+            <p style="max-width:600px;margin:0.75rem auto 0;color:#4a5568;font-size:0.95rem;">${escapeHtml(conclusion.explanation)}</p>
 
-            <div style="margin:1rem 0;color:#cbd5e0;font-size:1.4rem;">&darr;</div>
+            <details style="max-width:600px;margin:1.5rem auto 0;text-align:left;">
+                <summary style="cursor:pointer;text-align:center;color:#718096;font-size:0.85rem;text-transform:uppercase;letter-spacing:0.05em;">How this was reached</summary>
 
-            <div style="font-size:0.8rem;color:#a0aec0;text-transform:uppercase;letter-spacing:0.05em;margin-bottom:0.5rem;">Step 2 &middot; LLM Recheck Against Official Sources</div>
-            <div class="prediction-badge" style="background:${officialMeta.bg};color:${officialMeta.fg};font-size:1.3rem;">
-                ${officialMeta.label}
-            </div>
-            ${officialConfidencePct !== null ? `<div style="font-size:0.9rem;color:#4a5568;margin-top:0.25rem;">${officialConfidencePct}% confidence</div>` : ''}
+                <div style="margin-top:1rem;text-align:center;">
+                    <div style="font-size:0.8rem;color:#a0aec0;text-transform:uppercase;letter-spacing:0.05em;margin-bottom:0.5rem;">Step 1 &middot; Your Trained Model</div>
+                    <div class="prediction-badge" style="background:${modelMeta.bg};color:${modelMeta.fg};font-size:1.3rem;">
+                        ${modelMeta.label}
+                    </div>
+                    ${modelConfidencePct !== null ? `<div style="font-size:0.9rem;color:#4a5568;margin-top:0.25rem;">${modelConfidencePct}% confidence</div>` : ''}
 
-            <div class="prediction-badge" style="background:${agreementMeta.bg};color:${agreementMeta.fg};margin-top:1.25rem;font-size:0.95rem;">
-                ${agreementMeta.label}
-            </div>
+                    <div style="margin:1rem 0;color:#cbd5e0;font-size:1.4rem;">&darr;</div>
 
-            <p style="max-width:600px;margin:1rem auto 0;color:#4a5568;">${escapeHtml(officialResult.summary || '')}</p>
+                    <div style="font-size:0.8rem;color:#a0aec0;text-transform:uppercase;letter-spacing:0.05em;margin-bottom:0.5rem;">Step 2 &middot; LLM Recheck Against Official Sources</div>
+                    <div class="prediction-badge" style="background:${officialMeta.bg};color:${officialMeta.fg};font-size:1.3rem;">
+                        ${officialMeta.label}
+                    </div>
+                    ${officialConfidencePct !== null ? `<div style="font-size:0.9rem;color:#4a5568;margin-top:0.25rem;">${officialConfidencePct}% confidence</div>` : ''}
+
+                    <p style="max-width:600px;margin:1rem auto 0;color:#4a5568;">${escapeHtml(officialResult.summary || '')}</p>
+                </div>
+            </details>
         </div>
     `;
 }
