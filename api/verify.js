@@ -63,12 +63,33 @@ or "site:cdc.gov <topic>"). Ignore blogs, forums, social media, and outlets
 that are not one of these four official sources, even if they appear in
 search results.
 
+Rely on the search results' own snippets/titles to judge each source — do
+not attempt to separately open, browse, or fetch the full page content of
+any result. Some of these sites (BBC in particular) block that kind of
+automated page fetch via robots.txt, which has no bearing on whether the
+search snippet itself is good evidence; a search result is usable evidence
+on its own. If a particular fetch or page-open attempt is ever blocked or
+fails for any reason, silently disregard that one page and continue using
+whatever other search results you do have - never mention the failed
+fetch, robots.txt, or any other tool-level error in your output. No matter
+what happens during search, you must always finish by producing the exact
+JSON response shape below, never a prose explanation instead of it - if
+search truly turned up nothing usable, that is exactly what "unverified"
+is for.
+
+The submitted article may be in any language (it may also already have been
+machine-translated to English by the front end before reaching you - either
+way, treat it the same). Regardless of what language the article itself is
+in, your "summary" field must always be written in English — the site has
+its own separate "Translate result" feature for showing it in another
+language afterward, so do not translate or code-switch here.
+
 Respond with ONLY a single JSON object — no markdown fences, no extra
 commentary — in exactly this shape:
 {
   "verdict": "supported" | "contradicted" | "unverified",
   "confidence": 0.0 to 1.0,
-  "summary": "2-3 sentence plain-language explanation of what you found"
+  "summary": "2-3 sentence plain-language explanation of what you found, written in English"
 }
 
 Rules:
