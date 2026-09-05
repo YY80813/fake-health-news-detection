@@ -4,7 +4,10 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Fake Health News Detection System | LLM-Powered Fact Check</title>
-    <link rel="stylesheet" href="styles.css">
+    <!-- Root-absolute paths, not relative ones: this same index.html is also
+         served (via vercel.json's rewrite) at /result/<id> for shared links,
+         and a relative "styles.css" would resolve to the wrong place there. -->
+    <link rel="stylesheet" href="/styles.css">
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
     <!-- Client-side PDF generation for the "Download Report" button (see script.js's buildReportPDF) -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/4.2.1/jspdf.umd.min.js"></script>
@@ -101,6 +104,10 @@
 
             <!-- Main detector column -->
             <div class="detector-main">
+                <!-- Shown only when this page was opened via a shared /result/<id>
+                     link (see script.js's loadSharedResult) - hidden otherwise. -->
+                <div id="sharedResultNotice" class="shared-result-notice" style="display:none;"></div>
+
                 <!-- Input Card -->
                 <div class="card">
                     <div class="card-header">
@@ -219,6 +226,10 @@ Example:
                         <h3>System Statistics</h3>
                         <button class="reset-btn" onclick="resetStats()">Reset</button>
                     </div>
+                    <!-- These numbers below are this browser's own (localStorage).
+                         This line is the site-wide equivalent across every visitor,
+                         backed by api/stats.js - hidden if that isn't configured. -->
+                    <div id="globalStatsLine" class="global-stats-line" style="display:none;"></div>
                     <div class="stats-grid">
                         <div class="stat-card">
                             <div class="stat-icon">🔮</div>
@@ -296,6 +307,6 @@ Example:
         </div>
     </footer>
 
-    <script src="script.js"></script>
+    <script src="/script.js"></script>
 </body>
 </html>

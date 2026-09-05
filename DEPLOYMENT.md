@@ -257,3 +257,85 @@ fake/real verdict with a confidence score.
   already merged into `transformers`' unreleased code, just not published
   yet, so `hf-space/requirements.txt` installs straight from its GitHub
   `main` branch until a fixed PyPI release ships.
+
+## Shareable result links & site-wide stats (optional - needs a database)
+
+Two features need somewhere to store data server-side, which this project
+otherwise has no need for (everything else runs off `localStorage` in the
+Reader's own browser):
+
+- The **"Share" button's real permalink** — a `/result/<id>` link that
+  *anyone* can open and see the same verdict, not just the browser that ran
+  the check. Without this, "Share" still works, but falls back to sharing
+  this site's homepage link instead of a link to that specific result.
+- The **"Site-wide (all visitors)" line** in the Stats Dashboard — total
+  checks / fake / real / average confidence across *every* visitor, instead
+  of only the numbers already shown below it (which are per-browser). No
+  article text or visitor identity is ever stored for this — just five
+  running counters.
+
+Both are backed by `api/share.js` + `api/result.js` + `api/stats.js`, which
+talk to a small [Upstash](https://upstash.com) Redis database over its REST
+API (`lib/upstash.js` — plain `fetch`, no SDK, consistent with every other
+`api/*.js` file in this project). **This is entirely optional** — if you
+skip this section, the site works exactly as it did before: no error, no
+broken feature, the Share menu just won't have a specific link to offer and
+the global-stats line stays hidden.
+
+### Setup
+
+1. Create a free Redis database — either:
+   - **Via Vercel** (easiest if you're already deploying there): in your
+     Vercel project, go to the **Storage** tab → **Create Database** →
+     choose the **Upstash** / **Redis** option (branded as "Upstash for
+     Redis" in Vercel's Marketplace) → follow the prompts. Vercel wires the
+     two env vars below into your project automatically when you connect it
+     this way — skip to step 3.
+   - **Directly at [console.upstash.com](https://console.upstash.com)**:
+     sign up (free, no credit card needed for the free tier) → click the
+     **Redis** tab → **+ Create Database** → give it a name → pick
+     **Regional** as the type (simplest choice — Global works on the free
+     tier too, but only replicates to one extra read region there and adds
+     complexity this project doesn't need) → pick a region close to where
+     your Vercel deployment runs → **Create**.
+2. On the database's own page (skip this if Vercel connected it for you in
+   step 1): open the **Connect** section → **REST** tab. You'll see
+   `UPSTASH_REDIS_REST_URL` and `UPSTASH_REDIS_REST_TOKEN` listed directly
+   (hover either field for a copy button) — copy both.
+3. Set both as environment variables on your deployment platform (same
+   place you set `OPENAI_API_KEY` and `HF_SPACE_URL` — see `.env.example`).
+   Do this *before* your next deploy if you can — env vars only apply to
+   deployments made after they're set, so adding them after you've already
+   deployed means triggering one more redeploy afterward.
+4. Redeploy. No code changes needed beyond what's already in this repo —
+   `api/share.js`, `api/result.js`, and `api/stats.js` pick these up
+   automatically once they're set.
+
+### Notes
+
+- **Storage footprint is tiny.** Each shared result is a few KB of JSON;
+  the five stats counters are just numbers. Upstash's free tier (256MB,
+  500K commands/month at the time of writing) comfortably covers a FYP
+  project's traffic with a lot of headroom — check
+  [upstash.com/pricing](https://upstash.com/pricing) for current limits.
+- **Shared links expire after 1 year** (`TTL_SECONDS` in `api/share.js`) —
+  a storage-hygiene choice, not a technical limit. Change or remove it
+  there if you want links to last longer (or never expire).
+- **This is a public, unauthenticated endpoint** (`api/share.js`) — anyone
+  who can reach your deployed site can create a shared link, the same way
+  anyone can already run a check on the homepage. `api/share.js` caps the
+  size of what it stores and reshapes the request into exactly the fields
+  it expects (see `sanitizePayload`) rather than storing whatever's sent
+  verbatim, but this is basic anti-abuse, not exhaustive - there's no rate
+  limiting. That's a reasonable trade-off for a FYP demo; worth flagging as
+  a "future work" item in your report if you want to be thorough about it.
+- **Relative asset paths were changed to root-absolute** (`/styles.css`,
+  `/script.js` in `index.html`) as part of adding this - a shared result is
+  served at `/result/<id>` (via the rewrite in `vercel.json`, which maps it
+  back to `index.html`), and a *relative* `styles.css` reference would have
+  resolved to the wrong URL (`/result/styles.css`) on that path. If you ever
+  add more pages, keep asset references root-absolute for the same reason.
+- If `/result/<id>` 404s on the deployed site even though the code is
+  pushed, double check `vercel.json` made it into the repo — that rewrite
+  is what makes the pretty URL work at all; without it, only
+  `/api/result?id=<id>` (the raw JSON endpoint) would respond.

@@ -31,12 +31,29 @@ const NEWS_API_URL = '/api/news';
 // Hugging Face Hub and called through HF's serverless Inference API.
 const MODEL_API_URL = '/api/predict';
 
+// Backs the "Share" feature's real persistent link (see api/share.js /
+// api/result.js) and the site-wide numbers in the Stats Dashboard (see
+// api/stats.js). Both are backed by a small Upstash Redis database - if
+// that isn't configured on this deployment, these calls fail soft and the
+// corresponding UI (the global-stats line, real permalinks) just doesn't
+// appear, rather than breaking anything else on the page.
+const SHARE_API_URL = '/api/share';
+const RESULT_API_URL = '/api/result';
+const STATS_API_URL = '/api/stats';
+
 // Initialize tabs
 document.addEventListener('DOMContentLoaded', () => {
     initTabs();
     initStats();
     loadHistory();
     loadOfficialNews();
+    loadGlobalStats();
+
+    // If this page was opened via a shared /result/<id> link (see
+    // vercel.json's rewrite to /index.html), render that stored result
+    // instead of waiting for the visitor to run their own check.
+    const sharedId = getSharedResultIdFromUrl();
+    if (sharedId) loadSharedResult(sharedId);
 });
 
 function initTabs() {
@@ -629,6 +646,44 @@ function resetStats() {
 }
 
 // ============================================================================
+// Site-wide stats (api/stats.js) - the database-backed counterpart to the
+// per-browser numbers above. Those only ever reflect one browser's own
+// localStorage; these come from a small Upstash Redis database shared by
+// every visitor. If that isn't configured on this deployment, the line
+// simply stays hidden rather than showing zeros or an error.
+// ============================================================================
+
+async function loadGlobalStats() {
+    const el = document.getElementById('globalStatsLine');
+    if (!el) return;
+    try {
+        const response = await fetch(STATS_API_URL);
+        if (!response.ok) throw new Error(`Request failed (${response.status})`);
+        const data = await response.json();
+        if (data.unavailable) {
+            el.style.display = 'none';
+            return;
+        }
+        const avgPct = typeof data.avgConfidence === 'number' ? Math.round(data.avgConfidence * 100) + '%' : 'n/a';
+        el.textContent = `🌍 Site-wide (all visitors): ${data.total} checks · ${data.fake} flagged fake · ${data.real} verified real · ${avgPct} avg confidence`;
+        el.style.display = 'block';
+    } catch (err) {
+        el.style.display = 'none';
+    }
+}
+
+// Fire-and-forget: a hiccup here should never interrupt or slow down
+// showing the Reader their own result, so this isn't awaited by its caller
+// and swallows its own errors.
+function recordGlobalStat(result) {
+    fetch(STATS_API_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ verdict: result.verdict, confidence: result.confidence })
+    }).then(() => loadGlobalStats()).catch(() => {});
+}
+
+// ============================================================================
 // History
 // ============================================================================
 
@@ -741,9 +796,13 @@ function displayResults(text, officialResult, modelData) {
     renderModelPrediction(modelData);
     renderTextAnalysis(text);
     updateStats(officialResult);
+    recordGlobalStat(officialResult);
 
     // Snapshot everything the Download/Share buttons need, so they just
     // format whatever's currently on screen rather than re-running anything.
+    // shareUrl starts empty and is filled in (and cached here) the first
+    // time a Share action actually needs a real permalink - see
+    // getOrCreateShareLink().
     lastAnalysis = {
         text,
         officialResult,
@@ -753,7 +812,92 @@ function displayResults(text, officialResult, modelData) {
         secondaryKey,
         secondaryResult,
         conclusion: computeFinalConclusion(primaryResult, officialResult),
-        timestamp: new Date()
+        timestamp: new Date(),
+        shareUrl: null
+    };
+
+    resultsCard.scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
+// ============================================================================
+// Shared results (/result/<id> links created by the Share feature - see
+// api/share.js / api/result.js and vercel.json's rewrite). When this page
+// is opened that way, it skips straight to rendering the stored result
+// instead of showing an empty input card.
+// ============================================================================
+
+// /result/<id> is served by vercel.json's rewrite to this same index.html,
+// so the ID has to be read from the URL path here rather than relying on a
+// server-side route/template.
+function getSharedResultIdFromUrl() {
+    const match = location.pathname.match(/^\/result\/([A-Za-z0-9]{6,32})\/?$/);
+    return match ? match[1] : null;
+}
+
+async function loadSharedResult(id) {
+    const resultsCard = document.getElementById('resultsCard');
+    try {
+        const response = await fetch(`${RESULT_API_URL}?id=${encodeURIComponent(id)}`);
+        if (!response.ok) {
+            const errBody = await response.json().catch(() => ({}));
+            throw new Error(errBody.error || `Request failed (${response.status})`);
+        }
+        const payload = await response.json();
+        renderSharedResult(payload, id);
+    } catch (err) {
+        resultsCard.style.display = 'block';
+        document.getElementById('resultBanner').innerHTML =
+            `<div style="padding:2rem;text-align:center;color:#742a2a;">⚠️ ${escapeHtml(err.message)}</div>`;
+        resultsCard.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+}
+
+// Renders a result fetched from api/result.js using the exact same
+// rendering functions the live "Analyze & Detect" flow uses
+// (renderBanner/renderOfficialCheck/renderModelPrediction/renderTextAnalysis)
+// so a shared result looks identical to what the person who shared it saw -
+// just without re-running the model or the official-source check. Also
+// repopulates lastAnalysis, so the Download/Share buttons work on a shared
+// result too (and Share reuses this same permalink rather than minting a
+// new one).
+function renderSharedResult(payload, id) {
+    const { text, officialResult, modelData, primaryKey } = payload;
+    const primaryResult = modelData.results[primaryKey];
+    const secondaryKey = Object.keys(modelData.results).find(k => k !== primaryKey) || null;
+    const secondaryResult = secondaryKey ? modelData.results[secondaryKey] : null;
+
+    document.getElementById('newsText').value = text;
+
+    const notice = document.getElementById('sharedResultNotice');
+    if (notice) {
+        notice.style.display = 'flex';
+        notice.innerHTML =
+            '<span>📌 You\'re viewing a result someone shared - it isn\'t live-updated. ' +
+            'Want to check your own article?</span>' +
+            '<button type="button" onclick="location.href=\'/\'">Check a new article →</button>';
+    }
+
+    const resultsCard = document.getElementById('resultsCard');
+    resultsCard.style.display = 'block';
+
+    renderBanner(officialResult, primaryResult);
+    renderOfficialCheck(officialResult);
+    renderModelPrediction(modelData);
+    renderTextAnalysis(text);
+
+    lastAnalysis = {
+        text,
+        officialResult,
+        modelData,
+        primaryKey,
+        primaryResult,
+        secondaryKey,
+        secondaryResult,
+        conclusion: computeFinalConclusion(primaryResult, officialResult),
+        timestamp: payload.timestamp && !isNaN(Date.parse(payload.timestamp)) ? new Date(payload.timestamp) : new Date(),
+        // Already has a permalink - reuse it instead of creating a duplicate
+        // database entry the next time a Share action runs on this page.
+        shareUrl: `${location.origin}/result/${id}`
     };
 
     resultsCard.scrollIntoView({ behavior: 'smooth', block: 'start' });
@@ -1250,21 +1394,62 @@ async function downloadResultImage() {
     }
 }
 
-function buildShareText() {
+// Posts the current result to api/share.js the first time it's actually
+// needed and caches the resulting URL on lastAnalysis, so repeat clicks
+// across Twitter/Facebook/WhatsApp/Instagram/copy/Web-Share within the same
+// result all reuse one link instead of minting a new database entry each
+// time. Returns null (rather than throwing) if the backend isn't
+// configured or the request fails - every caller already knows to fall
+// back to the plain homepage URL in that case.
+async function getOrCreateShareLink() {
+    if (!lastAnalysis) return null;
+    if (lastAnalysis.shareUrl) return lastAnalysis.shareUrl;
+
+    try {
+        const response = await fetch(SHARE_API_URL, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                text: lastAnalysis.text,
+                officialResult: lastAnalysis.officialResult,
+                modelData: lastAnalysis.modelData,
+                primaryKey: lastAnalysis.primaryKey,
+                timestamp: lastAnalysis.timestamp.toISOString()
+            })
+        });
+        if (!response.ok) return null;
+        const data = await response.json();
+        if (data && data.url) {
+            lastAnalysis.shareUrl = data.url;
+            return data.url;
+        }
+        return null;
+    } catch (err) {
+        return null;
+    }
+}
+
+// `url` is embedded directly in the returned text (rather than left as a
+// separate field) so it survives being pasted into WhatsApp, Instagram
+// captions, or a clipboard paste - anywhere that doesn't have its own
+// dedicated "link" slot the way Web Share's `url` field or Twitter/
+// Facebook's `url=` parameter do.
+function buildShareText(url) {
     if (!lastAnalysis) return '';
     const { conclusion, text } = lastAnalysis;
     const cleanLabel = conclusion.label.replace(/[✀-➿☀-⛿️]/g, '').trim();
     const snippet = text.length > 120 ? text.slice(0, 120) + '…' : text;
-    return `Fake Health News Detector says: ${cleanLabel}\n"${snippet}"\n\nChecked against BBC Health, KKM, WHO & CDC.`;
+    let out = `Fake Health News Detector says: ${cleanLabel}\n"${snippet}"\n\nChecked against BBC Health, KKM, WHO & CDC.`;
+    if (url) out += `\n${url}`;
+    return out;
 }
 
 // The "Share" button's dropdown: platform share-intent links plus a
 // "share via device" option (see shareViaWebShare) and a copy-to-clipboard
-// fallback. A static/serverless site has no backend to mint a persistent
-// per-result URL, so what gets shared is the text summary (and, for the
-// device share sheet, the result-card image too) rather than a link back to
-// this specific result.
-function toggleShareMenu(event) {
+// fallback. Each link points at a real, permanent /result/<id> page (see
+// api/share.js) when that's available, falling back to this site's
+// homepage if it isn't configured on this deployment.
+async function toggleShareMenu(event) {
     event.stopPropagation();
     if (!lastAnalysis) {
         alert('Run an analysis first, then you can share its result.');
@@ -1275,15 +1460,23 @@ function toggleShareMenu(event) {
     closeShareMenu();
     if (!wasHidden) return;
 
-    const shareText = buildShareText();
-    const pageUrl = location.href.split('#')[0];
-    document.getElementById('shareTwitter').href =
-        'https://twitter.com/intent/tweet?text=' + encodeURIComponent(shareText) + '&url=' + encodeURIComponent(pageUrl);
-    document.getElementById('shareFacebook').href =
-        'https://www.facebook.com/sharer/sharer.php?u=' + encodeURIComponent(pageUrl) + '&quote=' + encodeURIComponent(shareText);
-    document.getElementById('shareWhatsapp').href =
-        'https://wa.me/?text=' + encodeURIComponent(shareText + '\n\n' + pageUrl);
+    const shareBtn = event.currentTarget;
+    const originalLabel = shareBtn.textContent;
+    shareBtn.textContent = '📤 Preparing link…';
+    shareBtn.disabled = true;
 
+    const shareUrl = (await getOrCreateShareLink()) || location.href.split('#')[0];
+    const shareText = buildShareText(shareUrl);
+
+    document.getElementById('shareTwitter').href =
+        'https://twitter.com/intent/tweet?text=' + encodeURIComponent(buildShareText()) + '&url=' + encodeURIComponent(shareUrl);
+    document.getElementById('shareFacebook').href =
+        'https://www.facebook.com/sharer/sharer.php?u=' + encodeURIComponent(shareUrl) + '&quote=' + encodeURIComponent(buildShareText());
+    document.getElementById('shareWhatsapp').href =
+        'https://wa.me/?text=' + encodeURIComponent(shareText);
+
+    shareBtn.textContent = originalLabel;
+    shareBtn.disabled = false;
     menu.hidden = false;
     document.addEventListener('click', closeShareMenuOnOutsideClick);
 }
@@ -1299,46 +1492,62 @@ function closeShareMenuOnOutsideClick(e) {
     if (wrapper && !wrapper.contains(e.target)) closeShareMenu();
 }
 
-// Tries the device's native share sheet first (works well on mobile Chrome
-// and Safari, and desktop Safari/Edge) - attaching the result-card image itself
-// where the platform supports sharing files, not just text. Falls back to
-// copying the text summary to the clipboard if Web Share isn't supported at
-// all; the platform link menu (toggleShareMenu) covers browsers in between.
+// Tries the device's native share sheet first, attaching the result-card
+// image itself where the platform supports sharing files (mainly mobile
+// Chrome and Apple's browsers). Most desktop browsers - including Windows
+// Chrome/Edge - only support sharing text + a link through this API, not
+// files, so in that case the image is downloaded automatically alongside
+// the text/link share rather than silently left out. Falls back further to
+// copying the text summary to the clipboard (plus the image download) if
+// Web Share isn't supported at all; the platform link menu (toggleShareMenu)
+// covers browsers in between.
 async function shareViaWebShare() {
     if (!lastAnalysis) return;
     closeShareMenu();
-    const shareText = buildShareText();
+    const shareUrl = (await getOrCreateShareLink()) || location.href.split('#')[0];
+    const shareText = buildShareText(shareUrl);
+    let blob = null;
 
     try {
-        const blob = await generateResultImageBlob();
+        blob = await generateResultImageBlob();
         const file = new File([blob], 'fake-health-news-result.png', { type: 'image/png' });
         if (navigator.canShare && navigator.canShare({ files: [file] })) {
-            await navigator.share({ files: [file], title: 'Fake Health News Detection Result', text: shareText });
+            await navigator.share({ files: [file], title: 'Fake Health News Detection Result', text: shareText, url: shareUrl });
             return;
         }
     } catch (err) {
         if (err && err.name === 'AbortError') return;
-        // Fall through to text-only share / manual fallback below.
+        // Fall through to text-only share / manual fallback below. `blob`
+        // may still be set even though file-sharing itself isn't supported.
     }
 
     if (navigator.share) {
         try {
-            await navigator.share({ title: 'Fake Health News Detection Result', text: shareText, url: location.href });
+            await navigator.share({ title: 'Fake Health News Detection Result', text: shareText, url: shareUrl });
+            if (blob) {
+                triggerDownload(blob, `fake-health-news-result-${Date.now()}.png`);
+                alert("This browser's share sheet can only carry text and a link, not images, so the result-card image was also downloaded — attach it by hand if you'd like to include it.");
+            }
             return;
         } catch (err) {
             if (err && err.name === 'AbortError') return;
         }
     }
 
-    copyShareText();
-    alert("Your browser doesn't support direct sharing, so the summary was copied to your clipboard instead — paste it wherever you'd like to share it, or use one of the platform links in the Share menu.");
+    if (blob) triggerDownload(blob, `fake-health-news-result-${Date.now()}.png`);
+    await copyShareText();
+    alert(blob
+        ? "Your browser doesn't support direct sharing, so the summary was copied to your clipboard and the result-card image was downloaded — paste the text and attach the image wherever you'd like to share it."
+        : "Your browser doesn't support direct sharing, so the summary was copied to your clipboard instead — paste it wherever you'd like to share it, or use one of the platform links in the Share menu."
+    );
 }
 
 // Instagram has no web share-intent URL like Twitter/Facebook/WhatsApp - it
 // deliberately doesn't support pre-filled posts from outside its own app,
 // for any account. The honest, functional equivalent: download the same
-// result-card image used elsewhere and copy the caption, so the Reader can
-// paste both into a new Instagram post or Story in a couple of taps.
+// result-card image used elsewhere and copy the caption (with the real
+// permalink embedded in it, when one's available), so the Reader can paste
+// both into a new Instagram post or Story in a couple of taps.
 async function shareToInstagram() {
     closeShareMenu();
     if (!lastAnalysis) return;
@@ -1348,13 +1557,14 @@ async function shareToInstagram() {
     } catch (err) {
         // If the image failed to generate, still offer the caption text below.
     }
-    copyShareText();
+    await copyShareText();
     alert('Instagram doesn\'t allow posts to be pre-filled from a website, so the result image has been downloaded and the caption copied to your clipboard. Open Instagram, start a new post or Story with that image, then paste the caption.');
 }
 
-function copyShareText() {
+async function copyShareText() {
     if (!lastAnalysis) return;
-    const shareText = buildShareText();
+    const shareUrl = (await getOrCreateShareLink()) || location.href.split('#')[0];
+    const shareText = buildShareText(shareUrl);
     if (navigator.clipboard && navigator.clipboard.writeText) {
         navigator.clipboard.writeText(shareText).then(() => {
             closeShareMenu();
