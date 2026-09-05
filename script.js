@@ -447,6 +447,16 @@ function handleTranslateResultClick() {
 // swaps them into the existing DOM nodes in place. The underlying claim
 // text and sources are left untouched - only this human-readable narration
 // is translated.
+//
+// "English" is deliberately NOT special-cased to just restore the cached
+// original text here - api/verify.js is supposed to always answer in
+// English regardless of the claim's own language, but that's an LLM prompt
+// instruction, not a guarantee, so treating "English" as "revert" would
+// silently show whatever language the check actually came back in on the
+// rare time it doesn't comply. Every target language, English included,
+// goes through the same real translation call; "Show original" (see
+// revertResultTranslation) is the separate, explicit way back to whatever
+// was first displayed, in whatever language that happened to be.
 async function translateResultTo(targetLanguage) {
     if (!lastAnalysis) return;
 
@@ -456,9 +466,10 @@ async function translateResultTo(targetLanguage) {
     const tabSummary = document.getElementById('officialSummaryTab');
     if (!label || !explanation) return;
 
-    // Cache the English originals once, the first time this result is
-    // translated, so switching between languages (or reverting) never
-    // translates an already-translated string.
+    // Cache whatever was first displayed - not assumed to be English - the
+    // first time this result is translated, so switching between languages
+    // (or reverting via "Show original") never translates an
+    // already-translated string.
     if (!resultTranslationState.originals) {
         resultTranslationState.originals = {
             label: label.textContent,
@@ -466,11 +477,6 @@ async function translateResultTo(targetLanguage) {
             bannerSummary: bannerSummary ? bannerSummary.textContent : '',
             tabSummary: tabSummary ? tabSummary.textContent : ''
         };
-    }
-
-    if (targetLanguage === 'English') {
-        revertResultTranslation();
-        return;
     }
 
     const status = document.getElementById('translateResultStatus');
