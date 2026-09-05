@@ -1,12 +1,25 @@
-# Deliberately does NOT pin gradio, torch, or spaces here. This Space was
-# assigned "ZeroGPU" hardware by Hugging Face (shown as "Building on ZERO"
-# on the Space page), and its build pipeline force-installs its own Gradio
-# (6.26.0 as of writing), torch, and the `spaces` package into every
-# ZeroGPU Space regardless of what's listed here - pinning a different
-# Gradio version here (as an earlier version of this file did, at 3.50.2)
-# causes a hard pip dependency conflict during the build
-# ("ResolutionImpossible"). Only list what the platform doesn't already
-# provide.
+# Gradio is deliberately NOT pinned here - the `sdk_version: 6.26.0` line in
+# this folder's README.md frontmatter is what tells Hugging Face which
+# Gradio to install for a Gradio-SDK Space, and that applies regardless of
+# hardware tier. Pinning a *different* Gradio version here as well (as an
+# earlier version of this file did, at 3.50.2) caused a hard pip dependency
+# conflict during the build ("ResolutionImpossible") against that
+# SDK-provided version.
+#
+# torch IS explicitly listed below (via PyTorch's CPU wheel index), which
+# was NOT needed while this Space ran on free ZeroGPU hardware - ZeroGPU
+# pre-bakes its own CUDA-enabled torch into every ZeroGPU Space's container
+# regardless of requirements.txt, so listing it here would have been
+# redundant (and risked a conflicting version). CPU Upgrade hardware is a
+# plain, general-purpose container with no such special provisioning, so
+# without an explicit torch dependency here the app crashes at startup with
+# `ModuleNotFoundError: No module named 'torch'` - exactly what happened the
+# first time this Space was switched to CPU Upgrade. If this Space is ever
+# moved back to a GPU/ZeroGPU tier, this explicit CPU-only torch install
+# should be removed again, since it would conflict with that tier's own
+# pre-installed CUDA torch.
+--extra-index-url https://download.pytorch.org/whl/cpu
+torch
 #
 # transformers is installed straight from GitHub's main branch rather than
 # a normal PyPI version pin because of a temporary ecosystem-wide gap:

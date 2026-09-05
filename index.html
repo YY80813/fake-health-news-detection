@@ -118,6 +118,22 @@ Example:
                             <button class="example-btn clear-btn" onclick="clearText()">🗑️ Clear</button>
                         </div>
 
+                        <div class="model-choice-group" role="radiogroup" aria-label="Which trained model to use">
+                            <span class="examples-label">🤖 Model:</span>
+                            <label class="model-choice-option">
+                                <input type="radio" name="modelChoice" value="pubmedbert" checked>
+                                <span>PubMedBERT</span>
+                            </label>
+                            <label class="model-choice-option">
+                                <input type="radio" name="modelChoice" value="biobert">
+                                <span>BioBERT</span>
+                            </label>
+                            <label class="model-choice-option">
+                                <input type="radio" name="modelChoice" value="both">
+                                <span>Compare both</span>
+                            </label>
+                        </div>
+
                         <button id="predictBtn" class="btn-predict" onclick="predictNews()">
                             <span class="btn-icon">🔍</span>
                             Analyze & Detect
@@ -145,7 +161,7 @@ Example:
                     <!-- Tabs -->
                     <div class="tabs">
                         <button class="tab-btn active" data-tab="official">🌐 Official Check</button>
-                        <button class="tab-btn" data-tab="model">🤖 Your Model</button>
+                        <button class="tab-btn" data-tab="model">🤖 Your Model(s)</button>
                         <button class="tab-btn" data-tab="analysis">🔬 Text Analysis</button>
                         <button class="tab-btn" data-tab="history">📜 History</button>
                     </div>
@@ -235,8 +251,8 @@ Example:
                         <p>Every verdict comes with links to the specific official pages the model used, so you can check the sources yourself</p>
                     </div>
                     <div class="about-card">
-                        <h4>🤖 Your Trained Model</h4>
-                        <p>A PubMedBERT model fine-tuned on the HealthStory dataset (see the "Your Model" tab) runs alongside the LLM check and gives its own fake/real prediction with a confidence score</p>
+                        <h4>🤖 Your Trained Model(s)</h4>
+                        <p>PubMedBERT and BioBERT were both fine-tuned on the HealthStory dataset and compared in this project. Pick either one, or "Compare both", above the article box — the chosen model(s) run alongside the LLM check and give their own fake/real prediction with a confidence score</p>
                     </div>
                     <div class="about-card">
                         <h4>⚠️ Disclaimer</h4>

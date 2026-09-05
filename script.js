@@ -312,12 +312,23 @@ function renderOfficialCheck(result) {
 // served from Hugging Face Hub via api/predict.js)
 // ============================================================================
 
-async function getModelPrediction(text) {
+// modelChoice is 'pubmedbert' (default), 'biobert', or 'both' - see the
+// "Model" picker in the input card. The backend (api/predict.js) always
+// responds with { model, primary, results }, where `results` has one entry
+// per model actually run and `primary` names which of those is the one the
+// rest of the site (the Final Conclusion banner) treats as "the" model
+// verdict - see api/predict.js for why PubMedBERT is primary for 'both'.
+async function getModelPrediction(text, modelChoice) {
+    const requested = modelChoice === 'biobert' ? ['biobert']
+        : modelChoice === 'both' ? ['pubmedbert', 'biobert']
+        : ['pubmedbert'];
+    const primary = modelChoice === 'biobert' ? 'biobert' : 'pubmedbert';
+
     try {
         const response = await fetch(MODEL_API_URL, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ text })
+            body: JSON.stringify({ text, model: modelChoice })
         });
 
         if (!response.ok) {
@@ -329,12 +340,15 @@ async function getModelPrediction(text) {
     } catch (err) {
         // Most likely cause during development: api/predict.js isn't deployed
         // yet, or HF_SPACE_URL isn't set on the backend (see hf-space/README.md).
-        return {
+        const unavailable = {
             verdict: 'unavailable',
             confidence: null,
             summary: 'Could not reach your trained model. Make sure api/predict.js is deployed ' +
                      'and HF_SPACE_URL is set on the backend. Details: ' + err.message
         };
+        const results = {};
+        requested.forEach(key => { results[key] = unavailable; });
+        return { model: modelChoice, primary, results };
     }
 }
 
@@ -356,27 +370,77 @@ const MODEL_VERDICT_META = {
     }
 };
 
-function renderModelPrediction(result) {
-    const container = document.getElementById('modelContent');
-    if (!result) {
-        container.innerHTML = '<div style="text-align:center;padding:2rem;color:#718096;">No model prediction available.</div>';
-        return;
-    }
+const MODEL_DISPLAY_NAMES = { pubmedbert: 'PubMedBERT', biobert: 'BioBERT' };
 
+// One model's badge + confidence bar, used both for the single-model view
+// and as one column of the side-by-side comparison view.
+function renderOneModelCard(modelKey, result) {
     const meta = MODEL_VERDICT_META[result.verdict] || MODEL_VERDICT_META.unavailable;
     const confidencePct = typeof result.confidence === 'number' ? Math.round(result.confidence * 100) : null;
+    const name = MODEL_DISPLAY_NAMES[modelKey] || modelKey;
 
-    container.innerHTML = `
-        <div class="official-check">
+    return `
+        <div class="model-compare-card">
+            <div class="model-compare-name">${escapeHtml(name)}</div>
             <div class="verdict-badge ${result.verdict}">${meta.label}</div>
             <p class="official-summary">${result.summary ? escapeHtml(result.summary) : 'No summary returned.'}</p>
             ${confidencePct !== null ? `
                 <div class="model-confidence-bar">
                     <div class="model-confidence-fill" style="width:${confidencePct}%;background:${meta.bg};"></div>
                 </div>
-                <div class="model-confidence-label">Model confidence: ${confidencePct}%</div>
+                <div class="model-confidence-label">${name} confidence: ${confidencePct}%</div>
             ` : ''}
-            <p style="margin-top:1.5rem;font-size:0.8rem;color:#a0aec0;">This is your fine-tuned PubMedBERT model's own prediction — independent of, and not filtered by, the Official Source Check above.</p>
+        </div>
+    `;
+}
+
+// modelData is the full { model, primary, results } object from
+// getModelPrediction - not just one model's result - so this can render
+// either a single model's card (the common case) or, when the Reader chose
+// "Compare both" in the input card, a side-by-side comparison of
+// PubMedBERT and BioBERT with an explicit agree/disagree note. Only the
+// `primary` result ever feeds the top Final Conclusion banner (see
+// renderBanner) - this tab is where the raw comparison itself lives.
+function renderModelPrediction(modelData) {
+    const container = document.getElementById('modelContent');
+    if (!modelData || !modelData.results) {
+        container.innerHTML = '<div style="text-align:center;padding:2rem;color:#718096;">No model prediction available.</div>';
+        return;
+    }
+
+    const keys = Object.keys(modelData.results);
+
+    if (keys.length <= 1) {
+        const key = keys[0] || 'pubmedbert';
+        container.innerHTML = `
+            <div class="official-check">
+                ${renderOneModelCard(key, modelData.results[key])}
+                <p style="margin-top:1.5rem;font-size:0.8rem;color:#a0aec0;">This is your fine-tuned ${escapeHtml(MODEL_DISPLAY_NAMES[key] || key)} model's own prediction — independent of, and not filtered by, the Official Source Check above. Pick "Compare both" above the article box to see it side by side with the other model.</p>
+            </div>
+        `;
+        return;
+    }
+
+    // Comparison view (both models ran).
+    const pubmed = modelData.results.pubmedbert;
+    const bio = modelData.results.biobert;
+    const bothResponded = pubmed && bio && pubmed.verdict !== 'unavailable' && bio.verdict !== 'unavailable';
+    const agree = bothResponded && pubmed.verdict === bio.verdict;
+
+    container.innerHTML = `
+        <div class="official-check" style="max-width:none;">
+            ${bothResponded ? `
+                <div class="model-agreement-note ${agree ? 'agree' : 'disagree'}">
+                    ${agree
+                        ? `✅ PubMedBERT and BioBERT agree: both say ${pubmed.verdict.toUpperCase()}.`
+                        : `⚠️ PubMedBERT and BioBERT disagree: PubMedBERT says ${pubmed.verdict.toUpperCase()}, BioBERT says ${bio.verdict.toUpperCase()}.`}
+                </div>
+            ` : ''}
+            <div class="model-compare-grid">
+                ${renderOneModelCard('pubmedbert', pubmed)}
+                ${renderOneModelCard('biobert', bio)}
+            </div>
+            <p style="margin-top:1.5rem;font-size:0.8rem;color:#a0aec0;">Both are independent, from-scratch fine-tunes on the same HealthStory dataset (FYP1 Chapter 5). The Final Conclusion banner above is fused against <strong>PubMedBERT's</strong> result specifically, since it was the stronger performer in that evaluation - BioBERT's result is shown here for direct comparison, not blended into the final verdict.</p>
         </div>
     `;
 }
@@ -568,7 +632,7 @@ function resetStats() {
 // History
 // ============================================================================
 
-function saveToHistory(text, result, modelResult) {
+function saveToHistory(text, result, modelResult, modelKey, secondaryResult, secondaryKey) {
     const historyItem = {
         id: Date.now(),
         text: text.substring(0, 150) + (text.length > 150 ? '...' : ''),
@@ -578,6 +642,12 @@ function saveToHistory(text, result, modelResult) {
         summary: result.summary,
         modelVerdict: modelResult ? modelResult.verdict : null,
         modelConfidence: modelResult ? modelResult.confidence : null,
+        modelKey: modelKey || 'pubmedbert',
+        // Only set when the Reader picked "Compare both" - lets the History
+        // tab show BioBERT's call alongside the primary PubMedBERT one.
+        secondaryModelVerdict: secondaryResult ? secondaryResult.verdict : null,
+        secondaryModelConfidence: secondaryResult ? secondaryResult.confidence : null,
+        secondaryModelKey: secondaryKey || null,
         timestamp: new Date().toLocaleString()
     };
 
@@ -608,6 +678,10 @@ function renderHistory() {
                 const confidencePct = typeof item.confidence === 'number' ? Math.round(item.confidence * 100) : null;
                 const modelMeta = item.modelVerdict ? (MODEL_VERDICT_META[item.modelVerdict] || MODEL_VERDICT_META.unavailable) : null;
                 const modelConfidencePct = typeof item.modelConfidence === 'number' ? Math.round(item.modelConfidence * 100) : null;
+                const modelName = MODEL_DISPLAY_NAMES[item.modelKey] || 'Model';
+                const secondaryMeta = item.secondaryModelVerdict ? (MODEL_VERDICT_META[item.secondaryModelVerdict] || MODEL_VERDICT_META.unavailable) : null;
+                const secondaryConfidencePct = typeof item.secondaryModelConfidence === 'number' ? Math.round(item.secondaryModelConfidence * 100) : null;
+                const secondaryName = MODEL_DISPLAY_NAMES[item.secondaryModelKey] || 'Second model';
                 return `
                 <div class="history-item">
                     <div class="history-text">
@@ -621,10 +695,18 @@ function renderHistory() {
                         ${confidencePct !== null ? `<div style="font-size: 0.75rem; margin-top: 0.25rem;">${confidencePct}% confidence</div>` : ''}
                         ${modelMeta ? `
                             <div style="margin-top: 0.5rem;">
-                                <span class="prediction-badge" style="background:${modelMeta.bg};color:${modelMeta.fg};font-size:0.8rem;padding:0.35rem 1rem;">
+                                <span class="prediction-badge" style="background:${modelMeta.bg};color:${modelMeta.fg};font-size:0.8rem;padding:0.35rem 1rem;" title="${escapeHtml(modelName)}">
                                     ${modelMeta.label}
                                 </span>
                                 ${modelConfidencePct !== null ? `<div style="font-size: 0.7rem; margin-top: 0.2rem;">${modelConfidencePct}% confidence</div>` : ''}
+                            </div>
+                        ` : ''}
+                        ${secondaryMeta ? `
+                            <div style="margin-top: 0.4rem;">
+                                <span class="prediction-badge" style="background:${secondaryMeta.bg};color:${secondaryMeta.fg};font-size:0.75rem;padding:0.3rem 0.9rem;" title="${escapeHtml(secondaryName)}">
+                                    ${escapeHtml(secondaryName)}: ${item.secondaryModelVerdict.toUpperCase()}
+                                </span>
+                                ${secondaryConfidencePct !== null ? `<div style="font-size: 0.65rem; margin-top: 0.2rem;">${secondaryConfidencePct}% confidence</div>` : ''}
                             </div>
                         ` : ''}
                     </div>
@@ -638,19 +720,37 @@ function renderHistory() {
 // Main flow
 // ============================================================================
 
-function displayResults(text, officialResult, modelResult) {
-    saveToHistory(text, officialResult, modelResult);
+// modelData is the full { model, primary, results } object from
+// getModelPrediction. Only the primary result feeds the Final Conclusion
+// banner and the history's main model badge; when "Compare both" was
+// selected, the non-primary model's result is also recorded to History
+// (see saveToHistory) and shown in full in the "Your Model" tab.
+function displayResults(text, officialResult, modelData) {
+    const primaryKey = modelData.primary;
+    const primaryResult = modelData.results[primaryKey];
+    const secondaryKey = Object.keys(modelData.results).find(k => k !== primaryKey) || null;
+    const secondaryResult = secondaryKey ? modelData.results[secondaryKey] : null;
+
+    saveToHistory(text, officialResult, primaryResult, primaryKey, secondaryResult, secondaryKey);
 
     const resultsCard = document.getElementById('resultsCard');
     resultsCard.style.display = 'block';
 
-    renderBanner(officialResult, modelResult);
+    renderBanner(officialResult, primaryResult);
     renderOfficialCheck(officialResult);
-    renderModelPrediction(modelResult);
+    renderModelPrediction(modelData);
     renderTextAnalysis(text);
     updateStats(officialResult);
 
     resultsCard.scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
+// Reads the "Model" picker in the input card (a radio group; see
+// index.html). Defaults to 'pubmedbert' if, for some reason, nothing is
+// checked yet.
+function getSelectedModelChoice() {
+    const checked = document.querySelector('input[name="modelChoice"]:checked');
+    return checked ? checked.value : 'pubmedbert';
 }
 
 async function predictNews() {
@@ -666,6 +766,8 @@ async function predictNews() {
         return;
     }
 
+    const modelChoice = getSelectedModelChoice();
+
     const loadingOverlay = document.getElementById('loadingOverlay');
     const loadingText = document.getElementById('loadingText');
     loadingOverlay.style.display = 'flex';
@@ -674,18 +776,22 @@ async function predictNews() {
 
     try {
         // Two-step pipeline, run in sequence rather than in parallel: your
-        // trained model makes the first call on the text, then the LLM
+        // trained model(s) make the first call on the text, then the LLM
         // independently rechecks it against official sources. renderBanner
         // compares the two rather than treating them as unrelated tabs.
-        if (loadingText) loadingText.textContent = 'Step 1/2: Running your trained model...';
-        const modelResult = await getModelPrediction(text);
+        if (loadingText) {
+            loadingText.textContent = modelChoice === 'both'
+                ? 'Step 1/2: Running PubMedBERT and BioBERT...'
+                : `Step 1/2: Running your trained model (${MODEL_DISPLAY_NAMES[modelChoice] || modelChoice})...`;
+        }
+        const modelData = await getModelPrediction(text, modelChoice);
 
         if (loadingText) loadingText.textContent = 'Step 2/2: Rechecking against BBC Health, KKM, WHO and CDC...';
         const officialResult = await verifyOfficialSources(text);
 
         loadingOverlay.style.display = 'none';
         predictBtn.disabled = false;
-        displayResults(text, officialResult, modelResult);
+        displayResults(text, officialResult, modelData);
     } catch (err) {
         loadingOverlay.style.display = 'none';
         predictBtn.disabled = false;

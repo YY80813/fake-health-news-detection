@@ -114,9 +114,9 @@ Gradio automatically exposes the model as a callable REST endpoint the same
 way the Docker/FastAPI version did — just with a slightly different
 request/response shape, which `api/predict.js` already handles.
 
-**1. Push the model to Hugging Face Hub** — **already done for this
-project**, at `YY80813/pubmedbert-fake-health-news`. (For reference, this
-was done from the end of `FYP_pubmedbert_finetuned.ipynb`, right after
+**1. Push the model(s) to Hugging Face Hub** — **already done for
+PubMedBERT**, at `YY80813/pubmedbert-fake-health-news`. (For reference,
+this was done from the end of `FYP_pubmedbert_finetuned.ipynb`, right after
 `trainer.train()`, so the `model` and `tokenizer` variables still held the
 best checkpoint — `load_best_model_at_end=True` in that notebook's
 `TrainingArguments` already ensures `model` is the best epoch, not just the
@@ -142,11 +142,39 @@ tokenizer.push_to_hub(REPO_ID)
 If you ever retrain and want to push a new version, just rerun this cell —
 no other setup below needs to change.)
 
+**BioBERT still needs to be pushed** (added for FYP2's model-comparison
+feature — see `hf-space/app.py` and `hf-space/README.md`). The identical
+recipe applies to `FYP_biobert_finetuned.ipynb`, which uses the same
+`model`/`tokenizer` variable names and already sets
+`load_best_model_at_end=True`, so the same cell works with only `REPO_ID`
+changed:
+
+```python
+!pip install huggingface_hub --quiet
+
+from huggingface_hub import notebook_login
+notebook_login()  # paste a HF *write* token: https://huggingface.co/settings/tokens
+
+model.config.id2label = {0: "Fake", 1: "Real"}
+model.config.label2id = {"Fake": 0, "Real": 1}
+
+REPO_ID = "YY80813/biobert-fake-health-news"  # pick any repo name you like
+model.push_to_hub(REPO_ID)
+tokenizer.push_to_hub(REPO_ID)
+```
+
+Then set `MODEL_REPO_BIOBERT` to whatever `REPO_ID` you used, as an
+environment variable on the Hugging Face Space (Settings → Variables and
+secrets) — see `hf-space/README.md`'s Setup section, step 3.
+
 **2. Create a Hugging Face Space**: go to https://huggingface.co/new-space →
-give it a name → **SDK: Gradio** → **Hardware**: whatever's offered for
-free (currently free accounts are being assigned "ZeroGPU" hardware rather
-than plain CPU basic — that's fine, `app.py` doesn't need a GPU) → Create
-Space.
+give it a name → **SDK: Gradio** → **Hardware**: **CPU Upgrade** (paid,
+~$0.03/hour) if you want it to never sleep — see "About the Space's
+hardware and cost" below — or whatever's offered for free otherwise
+(currently "ZeroGPU" rather than plain CPU basic) → Create Space. Already
+have a Space running on free/ZeroGPU hardware? Go to its **Settings** tab →
+**Hardware** → **CPU Upgrade** to switch it instead of creating a new one,
+then skip to step 5.
 
 **3. Upload the Space's files**: from this repo's `hf-space/` folder, upload
 `app.py`, `requirements.txt`, and `README.md` to the new Space — either via
@@ -186,12 +214,20 @@ which drives the two-step call above against `<HF_SPACE_URL>` and returns a
 fake/real verdict with a confidence score.
 
 **Notes:**
-- **Cold starts**: free Spaces "sleep" after a period of inactivity, same
-  idea as the Inference API's cold starts. The first request after a while
-  can take 20–60 seconds while the container wakes up and reloads the model
-  into memory — `api/predict.js` already waits up to 60 seconds for this,
-  so you don't need to do anything, just expect that first request to be
-  slow.
+- **About the Space's hardware and cost:** free Spaces (CPU basic or
+  ZeroGPU) "sleep" after a period of inactivity and cannot have that
+  disabled — the first request after a while can take 20–90 seconds while
+  the container wakes up and reloads the model into memory (`api/predict.js`
+  already waits up to 90 seconds for this). Per Hugging Face's own docs,
+  once a Space is switched to *any* paid hardware tier (like CPU Upgrade),
+  it **never sleeps by default** — no cold starts, no GPU queueing, since
+  it's a dedicated machine instead of shared. CPU Upgrade is ~$0.03/hour,
+  billed only while the Space is `Running` (not while `stopped`/paused) —
+  see https://huggingface.co/docs/hub/en/spaces-gpus for current pricing.
+  A BERT-base model like this one runs fine on CPU, so no GPU tier is
+  needed. If cost is a concern, you can leave the Space on free hardware
+  day-to-day and only switch it to CPU Upgrade for the days around your
+  demo/submission, then switch back afterward.
 - **This tab is independent of the Official Source Check.** It's your own
   classifier's opinion on the text itself, not filtered through official
   sources — the two can (and sometimes will) disagree, which is expected

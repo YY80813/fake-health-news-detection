@@ -1,27 +1,26 @@
 // api/predict.js
 //
-// Serverless backend for the "Your Model" tab - runs the PubMedBERT model
-// that was fine-tuned in this project's notebooks (FYP_pubmedbert_finetuned)
-// against the submitted article. This is completely independent of
-// api/verify.js: it's your own trained classifier's opinion, not an LLM +
-// web search.
+// Serverless backend for the "Your Model" tab - runs the fine-tuned
+// PubMedBERT and/or BioBERT models against the submitted article. This is
+// completely independent of api/verify.js: it's your own trained
+// classifier's opinion, not an LLM + web search.
 //
 // This calls a Hugging Face SPACE (see the hf-space/ folder in this repo),
 // not HF's serverless Inference API - the Inference API only serves a
 // curated "warm" allow-list of models and returns "Model not supported by
 // provider hf-inference" for custom fine-tuned checkpoints like this one.
-// Running the model yourself in a Space's own container (free CPU tier:
-// 16GB RAM) sidesteps that limitation.
+// Running the model yourself in a Space's own container sidesteps that
+// limitation.
 //
-// The Space runs Gradio (not Docker/FastAPI - Hugging Face now requires a
-// paid plan to create new Docker SDK Spaces on free hardware, but Gradio
-// SDK Spaces are still free to create). Free accounts are currently being
-// assigned "ZeroGPU" hardware for new Gradio Spaces, whose build pipeline
-// forces a specific newer Gradio version (6.x as of writing) - see
-// hf-space/requirements.txt and hf-space/README.md for why that matters.
+// The Space runs Gradio and now hosts TWO models (PubMedBERT and BioBERT -
+// see hf-space/app.py), selectable per request via a `model` field in the
+// POST body: 'pubmedbert' (default), 'biobert', or 'both'. This front-end
+// choice lets the Reader directly compare the two models FYP1 evaluated,
+// rather than only ever seeing the one that was picked as the deployed
+// default.
 //
-// Gradio 4+ (including that 6.x) exposes API-enabled functions through a
-// two-step, queue-based protocol rather than a single synchronous request:
+// Gradio 4+ exposes API-enabled functions through a two-step, queue-based
+// protocol rather than a single synchronous request:
 //   1. POST {space_url}/gradio_api/call/predict  with { data: [...] }
 //      -> returns { event_id: "..." } almost immediately.
 //   2. GET  {space_url}/gradio_api/call/predict/<event_id>
@@ -30,15 +29,18 @@
 // callSpace() below does both steps and parses the SSE stream.
 //
 // Setup:
-//   1. Push the fine-tuned model + tokenizer to a Hugging Face model repo
-//      (see hf-space/README.md and the main DEPLOYMENT.md for the Colab
-//      snippet - this step doesn't change from before).
+//   1. Push each fine-tuned model + tokenizer to its own Hugging Face model
+//      repo (see hf-space/README.md and the main DEPLOYMENT.md for the
+//      Colab snippet).
 //   2. Create a Hugging Face Space (Gradio SDK) and upload the files in
 //      hf-space/ to it - full walkthrough in hf-space/README.md.
 //   3. In your deployment platform, set:
 //        HF_SPACE_URL = https://<your-username>-<space-name>.hf.space
-//   4. Deploy. The front end calls POST /api/predict with { text }, which
-//      drives the two-step call above against <HF_SPACE_URL>.
+//      and, on the Space itself (Settings -> Variables and secrets):
+//        MODEL_REPO_PUBMEDBERT = <your pubmedbert repo>
+//        MODEL_REPO_BIOBERT    = <your biobert repo>
+//   4. Deploy. The front end calls POST /api/predict with { text, model },
+//      which drives the two-step call above against <HF_SPACE_URL>.
 //
 // NOTE: Like the other api/*.js files, this could not be live-tested from
 // the environment that built it (no network route to huggingface.co
@@ -49,8 +51,11 @@
 // ZeroGPU Spaces (see hf-space/README.md) can take longer than a plain CPU
 // Space to wake from sleep - on top of the usual container cold start,
 // there's also a queue for a shared GPU allocation - so this is set higher
-// than a bare "Space waking up" timeout would otherwise need to be.
+// than a bare "Space waking up" timeout would otherwise need to be. Running
+// two models for a "both" request also takes roughly twice as long as one.
 const SPACE_TIMEOUT_MS = 90000;
+
+const VALID_MODELS = ['pubmedbert', 'biobert', 'both'];
 
 module.exports = async function handler(req, res) {
   // Allow the static front end to call this even if it's hosted on a
@@ -92,12 +97,29 @@ module.exports = async function handler(req, res) {
     return;
   }
 
+  let model = (body && body.model) || 'pubmedbert';
+  if (typeof model !== 'string' || !VALID_MODELS.includes(model.toLowerCase())) {
+    res.status(400).json({ error: `model must be one of: ${VALID_MODELS.join(', ')}` });
+    return;
+  }
+  model = model.toLowerCase();
+
   const base = spaceUrl.replace(/\/+$/, '');
 
   try {
-    const scores = await callSpace(base, text);
-    const result = interpretScores(scores);
-    res.status(200).json(result);
+    const output = await callSpace(base, text, model);
+    const results = interpretModelOutput(output);
+
+    // Primary is the single result the rest of the site's decision-fusion
+    // logic (computeFinalConclusion in script.js) should treat as "the"
+    // model verdict. When both models were requested, PubMedBERT is used
+    // as the primary signal because it was the stronger performer in
+    // FYP1's comparative evaluation (higher fake-class F1, better
+    // generalisation); BioBERT's result is still returned for comparison,
+    // just not the one the final conclusion is fused against.
+    const primary = model === 'both' ? 'pubmedbert' : model;
+
+    res.status(200).json({ model, primary, results });
   } catch (err) {
     // NOTE: the front end's getModelPrediction() reads `error` from a
     // non-ok response (same convention as api/verify.js) - use that key
@@ -108,19 +130,19 @@ module.exports = async function handler(req, res) {
   }
 };
 
-async function callSpace(base, text) {
+async function callSpace(base, text, model) {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), SPACE_TIMEOUT_MS);
 
   try {
     // Step 1: kick off the call. Gradio's REST API takes positional inputs
     // as a "data" array matching the Interface's inputs list -
-    // hf-space/app.py has one input (the Textbox), so a single-element
-    // array here.
+    // hf-space/app.py has two inputs (the Textbox, then the model-choice
+    // Radio), so both are sent here in that order.
     const postRes = await fetch(base + '/gradio_api/call/predict', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ data: [text] }),
+      body: JSON.stringify({ data: [text, model] }),
       signal: controller.signal
     });
     if (!postRes.ok) {
@@ -149,7 +171,7 @@ async function callSpace(base, text) {
     return parseSseResult(raw);
   } catch (err) {
     if (err.name === 'AbortError') {
-      throw new Error('The model Space took too long to respond (it may be waking up from sleep - try again in a moment).');
+      throw new Error('The model Space took too long to respond (it may be waking up from sleep, or running two models for a comparison - try again in a moment).');
     }
     throw err;
   } finally {
@@ -160,7 +182,7 @@ async function callSpace(base, text) {
 // Parses Gradio's server-sent-events response into the actual value
 // returned by hf-space/app.py's predict(). A typical stream looks like:
 //   event: complete
-//   data: [{"scores": [...]}]
+//   data: [{"pubmedbert": {"scores": [...]}}]
 //
 // (possibly preceded by "event: heartbeat" keep-alive lines with no data,
 // which are ignored here - only the *last* "data:" line is used, since
@@ -188,18 +210,41 @@ function parseSseResult(raw) {
   }
 
   // Gradio wraps the function's return value as the first element of the
-  // final "data" array. hf-space/app.py's predict() returns either
-  // { scores: [...] } or { error: "..." } (its JSON output component).
+  // final "data" array. hf-space/app.py's predict() returns a dict keyed by
+  // model id, e.g. { pubmedbert: { scores: [...] } } or
+  // { pubmedbert: {...}, biobert: {...} } for a "both" request, or
+  // { error: "..." } for the shared input-validation error.
   const output = Array.isArray(parsed) ? parsed[0] : null;
-  if (!output) throw new Error('Unexpected response shape from the model Space.');
+  if (!output || typeof output !== 'object') throw new Error('Unexpected response shape from the model Space.');
   if (output.error) throw new Error(output.error);
-  if (!Array.isArray(output.scores)) throw new Error('Unexpected response shape from the model Space.');
-  return output.scores;
+  return output;
 }
 
-function interpretScores(scores) {
+// Converts { pubmedbert?: {scores|error}, biobert?: {scores|error} } into
+// { pubmedbert?: {verdict, confidence, summary}, biobert?: {...} }, one key
+// per model actually present in the Space's response.
+function interpretModelOutput(output) {
+  const results = {};
+  for (const key of Object.keys(output)) {
+    results[key] = interpretOneModel(key, output[key]);
+  }
+  return results;
+}
+
+function interpretOneModel(modelKey, modelOutput) {
+  const displayName = { pubmedbert: 'PubMedBERT', biobert: 'BioBERT' }[modelKey] || modelKey;
+
+  if (!modelOutput || modelOutput.error) {
+    return {
+      verdict: 'unavailable',
+      confidence: null,
+      summary: (modelOutput && modelOutput.error) || `${displayName} did not return a result.`
+    };
+  }
+
+  const scores = modelOutput.scores;
   if (!Array.isArray(scores) || scores.length === 0) {
-    return { verdict: 'unavailable', confidence: null, summary: 'Model returned no scores.', raw: scores };
+    return { verdict: 'unavailable', confidence: null, summary: `${displayName} returned no scores.`, raw: scores };
   }
 
   const top = [...scores].sort((a, b) => b.score - a.score)[0];
@@ -215,9 +260,9 @@ function interpretScores(scores) {
   const confidencePct = Math.round((top.score || 0) * 100);
 
   const summaries = {
-    fake: `Your fine-tuned PubMedBERT model classified this article as likely FAKE health news (${confidencePct}% confidence).`,
-    real: `Your fine-tuned PubMedBERT model classified this article as likely REAL health news (${confidencePct}% confidence).`,
-    unavailable: `Could not interpret the model's output label ("${top.label}").`
+    fake: `Your fine-tuned ${displayName} model classified this article as likely FAKE health news (${confidencePct}% confidence).`,
+    real: `Your fine-tuned ${displayName} model classified this article as likely REAL health news (${confidencePct}% confidence).`,
+    unavailable: `Could not interpret ${displayName}'s output label ("${top.label}").`
   };
 
   return {

@@ -427,6 +427,81 @@ body {
     background: #cbd5e0;
 }
 
+/* Model choice (PubMedBERT / BioBERT / Compare both) */
+.model-choice-group {
+    margin-top: 1rem;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.6rem;
+}
+
+.model-choice-option {
+    display: inline-flex;
+    align-items: center;
+    padding: 0.45rem 1rem;
+    border: 2px solid #e2e8f0;
+    border-radius: 20px;
+    font-size: 0.85rem;
+    color: #4a5568;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+
+.model-choice-option input {
+    margin-right: 0.4rem;
+    accent-color: #667eea;
+}
+
+.model-choice-option:hover {
+    border-color: #667eea;
+}
+
+.model-choice-option:has(input:checked) {
+    background: #667eea;
+    border-color: #667eea;
+    color: white;
+}
+
+/* Model comparison view (Your Model(s) tab, when "Compare both" is picked) */
+.model-agreement-note {
+    padding: 0.75rem 1.1rem;
+    border-radius: 12px;
+    font-weight: 600;
+    font-size: 0.9rem;
+    margin-bottom: 1.2rem;
+}
+
+.model-agreement-note.agree {
+    background: #c6f6d5;
+    color: #22543d;
+}
+
+.model-agreement-note.disagree {
+    background: #feebc8;
+    color: #7b341e;
+}
+
+.model-compare-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+    gap: 1.2rem;
+}
+
+.model-compare-card {
+    background: #f7fafc;
+    border: 1px solid #e2e8f0;
+    border-radius: 14px;
+    padding: 1.1rem;
+}
+
+.model-compare-name {
+    font-weight: 700;
+    font-size: 0.95rem;
+    color: #2d3748;
+    margin-bottom: 0.5rem;
+}
+
 /* Predict Button */
 .btn-predict {
     background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
