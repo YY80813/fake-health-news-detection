@@ -866,6 +866,15 @@ body {
     color: #22543d;
 }
 
+/* Compact size used inside the History table's cells - same palette as the
+   full-size badge above, just smaller so it fits a table row. */
+.verdict-badge.small {
+    padding: 0.3rem 0.7rem;
+    font-size: 0.78rem;
+    font-weight: 600;
+    white-space: nowrap;
+}
+
 .official-summary {
     margin-top: 1rem;
     color: #4a5568;
@@ -1064,30 +1073,116 @@ body {
     font-size: 0.85rem;
 }
 
-/* History List */
-.history-list {
-    max-height: 400px;
-    overflow-y: auto;
+/* History dashboard: a small all-time summary row (same numbers as the
+   Stats Dashboard's localStorage counters - see getStatsSnapshot in
+   script.js) followed by a proper table of the last 20 checks. */
+.history-summary {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+    gap: 0.85rem;
+    margin-bottom: 1.5rem;
 }
 
-.history-item {
-    background: #f7fafc;
-    border-radius: 12px;
-    padding: 1rem;
-    margin-bottom: 0.75rem;
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
+.history-stat {
+    background: linear-gradient(135deg, #f7fafc 0%, #edf2f7 100%);
+    border-radius: 14px;
+    padding: 0.9rem;
+    text-align: center;
 }
 
-.history-text {
-    flex: 1;
+.history-stat-value {
+    font-size: 1.6rem;
+    font-weight: 800;
+    color: #2d3748;
+}
+
+.history-stat.fake .history-stat-value {
+    color: #e53e3e;
+}
+
+.history-stat.real .history-stat-value {
+    color: #38a169;
+}
+
+.history-stat-label {
+    font-size: 0.78rem;
+    color: #718096;
+    margin-top: 0.15rem;
+}
+
+.history-table-wrapper {
+    overflow-x: auto;
+    border: 1px solid #e2e8f0;
+    border-radius: 14px;
+}
+
+.history-table {
+    width: 100%;
+    border-collapse: collapse;
     font-size: 0.85rem;
+}
+
+.history-table th,
+.history-table td {
+    padding: 0.75rem 1rem;
+    text-align: left;
+    white-space: nowrap;
+}
+
+.history-table th:nth-child(2),
+.history-table td:nth-child(2) {
+    white-space: normal;
+    min-width: 220px;
+}
+
+.history-table thead th {
+    background: #f7fafc;
+    color: #718096;
+    font-size: 0.72rem;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    border-bottom: 1px solid #e2e8f0;
+}
+
+.history-table tbody tr {
+    border-bottom: 1px solid #edf2f7;
+}
+
+.history-table tbody tr:last-child {
+    border-bottom: none;
+}
+
+.history-table tbody tr:hover {
+    background: #f7fafc;
+}
+
+.history-table td {
     color: #4a5568;
 }
 
-.history-prediction {
-    margin-left: 1rem;
+.history-date {
+    color: #a0aec0;
+    font-size: 0.8rem;
+}
+
+.history-footer-actions {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.75rem;
+    margin-top: 1rem;
+}
+
+.history-footer-note {
+    font-size: 0.75rem;
+    color: #a0aec0;
+}
+
+.history-empty {
+    text-align: center;
+    padding: 2rem;
+    color: #718096;
 }
 
 /* Responsive */

@@ -848,6 +848,29 @@ function renderTextAnalysis(text) {
 // Stats dashboard
 // ============================================================================
 
+// Single source of truth for the all-time, per-browser counters used both
+// by the Stats Dashboard cards (below) and by the History tab's summary
+// row (see renderHistory) - both display the exact same numbers, just in
+// two places on the page, so this is read from one place to keep them from
+// ever drifting apart.
+function getStatsSnapshot() {
+    const total = parseInt(localStorage.getItem('totalPredictions') || '0');
+    const fakeCount = parseInt(localStorage.getItem('fakeDetected') || '0');
+    const realCount = parseInt(localStorage.getItem('realDetected') || '0');
+    const totalConfidence = parseFloat(localStorage.getItem('totalConfidence') || '0');
+    const confidenceSamples = parseInt(localStorage.getItem('confidenceSamples') || '0');
+    const avgConfidencePct = confidenceSamples > 0 ? Math.round((totalConfidence / confidenceSamples) * 100) : 0;
+    return { total, fakeCount, realCount, avgConfidencePct };
+}
+
+function paintStatsDashboard() {
+    const snap = getStatsSnapshot();
+    document.getElementById('totalPredictions').innerText = snap.total;
+    document.getElementById('fakeDetected').innerText = snap.fakeCount;
+    document.getElementById('realDetected').innerText = snap.realCount;
+    document.getElementById('avgConfidence').innerText = snap.avgConfidencePct + '%';
+}
+
 function updateStats(result) {
     let total = parseInt(localStorage.getItem('totalPredictions') || '0');
     let fakeCount = parseInt(localStorage.getItem('fakeDetected') || '0');
@@ -873,25 +896,11 @@ function updateStats(result) {
     localStorage.setItem('totalConfidence', totalConfidence);
     localStorage.setItem('confidenceSamples', confidenceSamples);
 
-    document.getElementById('totalPredictions').innerText = total;
-    document.getElementById('fakeDetected').innerText = fakeCount;
-    document.getElementById('realDetected').innerText = realCount;
-    const avgConf = confidenceSamples > 0 ? Math.round((totalConfidence / confidenceSamples) * 100) : 0;
-    document.getElementById('avgConfidence').innerText = avgConf + '%';
+    paintStatsDashboard();
 }
 
 function initStats() {
-    const total = localStorage.getItem('totalPredictions') || '0';
-    const fakeCount = localStorage.getItem('fakeDetected') || '0';
-    const realCount = localStorage.getItem('realDetected') || '0';
-    const totalConfidence = parseFloat(localStorage.getItem('totalConfidence') || '0');
-    const confidenceSamples = parseInt(localStorage.getItem('confidenceSamples') || '0');
-
-    document.getElementById('totalPredictions').innerText = total;
-    document.getElementById('fakeDetected').innerText = fakeCount;
-    document.getElementById('realDetected').innerText = realCount;
-    const avgConf = confidenceSamples > 0 ? Math.round((totalConfidence / confidenceSamples) * 100) : 0;
-    document.getElementById('avgConfidence').innerText = avgConf + '%';
+    paintStatsDashboard();
 }
 
 function resetStats() {
@@ -902,6 +911,10 @@ function resetStats() {
         localStorage.removeItem('totalConfidence');
         localStorage.removeItem('confidenceSamples');
         initStats();
+        // The History tab's summary row shows these same counters - keep it
+        // in sync rather than leaving stale numbers there until the next
+        // check or tab switch re-renders it.
+        renderHistory();
     }
 }
 
@@ -947,6 +960,11 @@ function recordGlobalStat(result) {
 // History
 // ============================================================================
 
+// modelResult/modelKey here are whichever model's call actually drove the
+// Final Conclusion banner (see resolveEffectiveModelResult in
+// displayResults/renderSharedResult) - not necessarily PubMedBERT, so the
+// History table's "Prediction" column always matches what the banner
+// showed for that check, even when BioBERT was the more confident model.
 function saveToHistory(text, result, modelResult, modelKey, secondaryResult, secondaryKey) {
     const historyItem = {
         id: Date.now(),
@@ -958,12 +976,16 @@ function saveToHistory(text, result, modelResult, modelKey, secondaryResult, sec
         modelVerdict: modelResult ? modelResult.verdict : null,
         modelConfidence: modelResult ? modelResult.confidence : null,
         modelKey: modelKey || 'pubmedbert',
-        // Only set when the Reader picked "Compare both" - lets the History
-        // tab show BioBERT's call alongside the primary PubMedBERT one.
+        // Only set when the Reader picked "Compare both" - kept around for
+        // potential future use (e.g. a per-row detail view); the table
+        // itself only has room for the one resolved prediction per row.
         secondaryModelVerdict: secondaryResult ? secondaryResult.verdict : null,
         secondaryModelConfidence: secondaryResult ? secondaryResult.confidence : null,
         secondaryModelKey: secondaryKey || null,
-        timestamp: new Date().toLocaleString()
+        // ISO, not toLocaleString() - needs to parse back into a real Date
+        // reliably (see formatHistoryDate) regardless of the browser's
+        // locale, since it's read back from localStorage on every visit.
+        timestamp: new Date().toISOString()
     };
 
     predictionHistory.unshift(historyItem);
@@ -975,58 +997,127 @@ function saveToHistory(text, result, modelResult, modelKey, secondaryResult, sec
 function loadHistory() {
     const saved = localStorage.getItem('predictionHistory');
     if (saved) {
-        predictionHistory = JSON.parse(saved);
+        try {
+            predictionHistory = JSON.parse(saved);
+        } catch {
+            predictionHistory = [];
+        }
     }
 }
 
+function clearHistory() {
+    if (!confirm('Clear your check history? This only affects this browser - it doesn\'t change the all-time totals above.')) return;
+    predictionHistory = [];
+    localStorage.removeItem('predictionHistory');
+    renderHistory();
+}
+
+// Short "5 Sep" style date for the table - falls back to the raw stored
+// string for any older entry saved before timestamps were switched to ISO
+// (see saveToHistory), rather than showing "Invalid Date".
+// Fixed 3-letter abbreviations rather than toLocaleDateString(...,
+// {month:'short'}) - some locales (en-GB included) render September as the
+// 4-letter "Sept", which breaks the compact "5 Sep" table look this is
+// going for. Always a plain "D Mon", independent of ICU/browser quirks.
+const HISTORY_MONTH_ABBR = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
+function formatHistoryDate(timestamp) {
+    const d = new Date(timestamp);
+    if (isNaN(d.getTime())) return String(timestamp).split(',')[0] || String(timestamp);
+    return `${d.getDate()} ${HISTORY_MONTH_ABBR[d.getMonth()]}`;
+}
+
+// "Prediction" below is whichever model's call drove that check's Final
+// Conclusion (item.modelVerdict/modelConfidence - see saveToHistory).
+// "Verification" is the independent official-source check's own verdict.
+// They're deliberately two separate columns rather than one fused verdict,
+// same as the live result view keeps "Your Trained Model" and "Official
+// Source Check" as two distinct steps rather than hiding one inside the
+// other.
+const HISTORY_MODEL_VERDICT_DISPLAY = {
+    fake: { text: '🔴 Fake', cls: 'fake' },
+    real: { text: '🟢 Real', cls: 'real' },
+    unavailable: { text: '⚙️ N/A', cls: 'unavailable' }
+};
+
+const HISTORY_OFFICIAL_VERDICT_DISPLAY = {
+    supported: { text: '✅ Supported', cls: 'supported' },
+    contradicted: { text: '❌ Contradicted', cls: 'contradicted' },
+    unverified: { text: '⚠️ Insufficient', cls: 'unverified' },
+    unavailable: { text: '⚙️ Unavailable', cls: 'unavailable' }
+};
+
 function renderHistory() {
     const historyContainer = document.getElementById('historyContent');
+
+    // The summary row covers every check ever run in this browser (the
+    // same counters the Stats Dashboard below shows); the table under it
+    // only ever holds the most recent 20 (see saveToHistory) - the footer
+    // note spells out that distinction so the two numbers not matching
+    // doesn't read as a bug.
+    const snap = getStatsSnapshot();
+    const summaryHtml = `
+        <div class="history-summary">
+            <div class="history-stat">
+                <div class="history-stat-value">${snap.total}</div>
+                <div class="history-stat-label">Total Analysed</div>
+            </div>
+            <div class="history-stat fake">
+                <div class="history-stat-value">${snap.fakeCount}</div>
+                <div class="history-stat-label">Fake</div>
+            </div>
+            <div class="history-stat real">
+                <div class="history-stat-value">${snap.realCount}</div>
+                <div class="history-stat-label">Real</div>
+            </div>
+            <div class="history-stat">
+                <div class="history-stat-value">${snap.avgConfidencePct}%</div>
+                <div class="history-stat-label">Avg. Confidence</div>
+            </div>
+        </div>
+    `;
+
     if (predictionHistory.length === 0) {
-        historyContainer.innerHTML = '<div style="text-align: center; padding: 2rem; color: #718096;">No checks yet. Try analyzing some news!</div>';
+        historyContainer.innerHTML = summaryHtml +
+            '<div class="history-empty">No checks yet. Try analyzing some news!</div>';
         return;
     }
 
+    const rows = predictionHistory.map(item => {
+        const modelDisplay = HISTORY_MODEL_VERDICT_DISPLAY[item.modelVerdict] || HISTORY_MODEL_VERDICT_DISPLAY.unavailable;
+        const officialDisplay = HISTORY_OFFICIAL_VERDICT_DISPLAY[item.verdict] || HISTORY_OFFICIAL_VERDICT_DISPLAY.unavailable;
+        const confidencePct = typeof item.modelConfidence === 'number' ? `${Math.round(item.modelConfidence * 100)}%` : '—';
+
+        return `
+            <tr>
+                <td class="history-date">${escapeHtml(formatHistoryDate(item.timestamp))}</td>
+                <td title="${escapeHtml(item.fullText || item.text)}">${escapeHtml(item.text)}</td>
+                <td><span class="verdict-badge small ${modelDisplay.cls}">${modelDisplay.text}</span></td>
+                <td>${confidencePct}</td>
+                <td><span class="verdict-badge small ${officialDisplay.cls}">${officialDisplay.text}</span></td>
+            </tr>
+        `;
+    }).join('');
+
     historyContainer.innerHTML = `
-        <div class="history-list">
-            ${predictionHistory.map(item => {
-                const meta = verdictMeta(item.verdict);
-                const confidencePct = typeof item.confidence === 'number' ? Math.round(item.confidence * 100) : null;
-                const modelMeta = item.modelVerdict ? (MODEL_VERDICT_META[item.modelVerdict] || MODEL_VERDICT_META.unavailable) : null;
-                const modelConfidencePct = typeof item.modelConfidence === 'number' ? Math.round(item.modelConfidence * 100) : null;
-                const modelName = MODEL_DISPLAY_NAMES[item.modelKey] || 'Model';
-                const secondaryMeta = item.secondaryModelVerdict ? (MODEL_VERDICT_META[item.secondaryModelVerdict] || MODEL_VERDICT_META.unavailable) : null;
-                const secondaryConfidencePct = typeof item.secondaryModelConfidence === 'number' ? Math.round(item.secondaryModelConfidence * 100) : null;
-                const secondaryName = MODEL_DISPLAY_NAMES[item.secondaryModelKey] || 'Second model';
-                return `
-                <div class="history-item">
-                    <div class="history-text">
-                        <strong>${item.timestamp}</strong><br>
-                        "${item.text}"
-                    </div>
-                    <div class="history-prediction">
-                        <span class="prediction-badge" style="background:${meta.bg};color:${meta.fg};">
-                            ${meta.badgeText}
-                        </span>
-                        ${confidencePct !== null ? `<div style="font-size: 0.75rem; margin-top: 0.25rem;">${confidencePct}% confidence</div>` : ''}
-                        ${modelMeta ? `
-                            <div style="margin-top: 0.5rem;">
-                                <span class="prediction-badge" style="background:${modelMeta.bg};color:${modelMeta.fg};font-size:0.8rem;padding:0.35rem 1rem;" title="${escapeHtml(modelName)}">
-                                    ${modelMeta.label}
-                                </span>
-                                ${modelConfidencePct !== null ? `<div style="font-size: 0.7rem; margin-top: 0.2rem;">${modelConfidencePct}% confidence</div>` : ''}
-                            </div>
-                        ` : ''}
-                        ${secondaryMeta ? `
-                            <div style="margin-top: 0.4rem;">
-                                <span class="prediction-badge" style="background:${secondaryMeta.bg};color:${secondaryMeta.fg};font-size:0.75rem;padding:0.3rem 0.9rem;" title="${escapeHtml(secondaryName)}">
-                                    ${escapeHtml(secondaryName)}: ${item.secondaryModelVerdict.toUpperCase()}
-                                </span>
-                                ${secondaryConfidencePct !== null ? `<div style="font-size: 0.65rem; margin-top: 0.2rem;">${secondaryConfidencePct}% confidence</div>` : ''}
-                            </div>
-                        ` : ''}
-                    </div>
-                </div>
-            `;}).join('')}
+        ${summaryHtml}
+        <div class="history-table-wrapper">
+            <table class="history-table">
+                <thead>
+                    <tr>
+                        <th>Date</th>
+                        <th>Article</th>
+                        <th>Prediction</th>
+                        <th>Confidence</th>
+                        <th>Verification</th>
+                    </tr>
+                </thead>
+                <tbody>${rows}</tbody>
+            </table>
+        </div>
+        <div class="history-footer-actions">
+            <button type="button" class="reset-btn" onclick="clearHistory()">🗑️ Clear history</button>
+            <span class="history-footer-note">Table shows your last ${predictionHistory.length} check${predictionHistory.length === 1 ? '' : 's'} in this browser (max 20) - the totals above cover every check you've run here.</span>
         </div>
     `;
 }
@@ -1050,7 +1141,7 @@ function displayResults(text, officialResult, modelData) {
     const secondaryResult = secondaryKey ? modelData.results[secondaryKey] : null;
     const modelResolution = resolveEffectiveModelResult(modelData);
 
-    saveToHistory(text, officialResult, primaryResult, primaryKey, secondaryResult, secondaryKey);
+    saveToHistory(text, officialResult, modelResolution.result, modelResolution.key, secondaryResult, secondaryKey);
 
     const resultsCard = document.getElementById('resultsCard');
     resultsCard.style.display = 'block';
