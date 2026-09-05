@@ -6,6 +6,8 @@
     <title>Fake Health News Detection System | LLM-Powered Fact Check</title>
     <link rel="stylesheet" href="styles.css">
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+    <!-- Client-side PDF generation for the "Download Report" button (see script.js's buildReportPDF) -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/4.2.1/jspdf.umd.min.js"></script>
 </head>
 <body>
     <!-- Navigation -->
@@ -157,6 +159,29 @@ Example:
                 <div id="resultsCard" class="results-card" style="display: none;">
                     <!-- Verdict Banner -->
                     <div id="resultBanner" class="ensemble-banner"></div>
+
+                    <!-- Download / Share Actions -->
+                    <div class="share-actions">
+                        <button class="share-action-btn" onclick="downloadResultImage()" title="Download a shareable image card of this result">
+                            🖼️ Download Image
+                        </button>
+                        <button class="share-action-btn" onclick="downloadResultPDF()" title="Download the full report as a PDF">
+                            📄 Download Report (PDF)
+                        </button>
+                        <div class="share-menu-wrapper">
+                            <button class="share-action-btn share-btn" onclick="toggleShareMenu(event)">
+                                📤 Share
+                            </button>
+                            <div id="shareMenu" class="share-menu" hidden>
+                                <button type="button" onclick="shareViaWebShare()">📱 Share via device…</button>
+                                <a id="shareTwitter" href="#" target="_blank" rel="noopener noreferrer">🐦 X / Twitter</a>
+                                <a id="shareFacebook" href="#" target="_blank" rel="noopener noreferrer">📘 Facebook</a>
+                                <a id="shareWhatsapp" href="#" target="_blank" rel="noopener noreferrer">💬 WhatsApp</a>
+                                <button type="button" onclick="shareToInstagram()">📸 Instagram</button>
+                                <button type="button" onclick="copyShareText()">📋 Copy summary text</button>
+                            </div>
+                        </div>
+                    </div>
 
                     <!-- Tabs -->
                     <div class="tabs">

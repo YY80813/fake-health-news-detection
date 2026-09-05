@@ -742,6 +742,20 @@ function displayResults(text, officialResult, modelData) {
     renderTextAnalysis(text);
     updateStats(officialResult);
 
+    // Snapshot everything the Download/Share buttons need, so they just
+    // format whatever's currently on screen rather than re-running anything.
+    lastAnalysis = {
+        text,
+        officialResult,
+        modelData,
+        primaryKey,
+        primaryResult,
+        secondaryKey,
+        secondaryResult,
+        conclusion: computeFinalConclusion(primaryResult, officialResult),
+        timestamp: new Date()
+    };
+
     resultsCard.scrollIntoView({ behavior: 'smooth', block: 'start' });
 }
 
@@ -821,4 +835,545 @@ function setExample(type) {
 // Clear text
 function clearText() {
     document.getElementById('newsText').value = '';
+}
+
+// ============================================================================
+// Download & Share — lets a Reader keep or pass along one analysis result.
+// Everything here reads from `lastAnalysis` (set at the end of
+// displayResults) and is purely client-side: a plain-text report via
+// Blob + <a download>, a shareable PNG "result card" rendered with
+// <canvas>, and social sharing via the Web Share API where the browser
+// supports it, falling back to platform share-intent links since this is a
+// static/serverless site with no database to mint a persistent per-result
+// URL to share instead.
+// ============================================================================
+
+let lastAnalysis = null;
+
+function triggerDownload(blob, filename) {
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+// Converts a "#rrggbb" (or "#rgb") hex string into the [r,g,b] triple
+// jsPDF's setFillColor/setTextColor expect - lets the PDF reuse the exact
+// verdict colors already defined in VERDICT_META/computeFinalConclusion
+// instead of a separate PDF-only palette.
+function hexToRgb(hex) {
+    const clean = String(hex).replace('#', '');
+    const full = clean.length === 3 ? clean.split('').map(c => c + c).join('') : clean;
+    const num = parseInt(full, 16);
+    return [(num >> 16) & 255, (num >> 8) & 255, num & 255];
+}
+
+// Advances to a new PDF page if the next `needed` points of content
+// wouldn't fit above the bottom margin, returning the (possibly reset) y.
+function ensurePdfSpace(doc, y, needed, margin, pageHeight) {
+    if (y + needed > pageHeight - margin) {
+        doc.addPage();
+        return margin;
+    }
+    return y;
+}
+
+// Wraps `text` to fit `maxWidth` (using the PDF's current font/size) and
+// prints it line by line, adding pages as needed. Returns the y-coordinate
+// after the last line.
+function addPdfWrappedText(doc, text, x, y, maxWidth, lineHeight, margin, pageHeight) {
+    const lines = doc.splitTextToSize(String(text), maxWidth);
+    lines.forEach(line => {
+        y = ensurePdfSpace(doc, y, lineHeight, margin, pageHeight);
+        doc.text(line, x, y);
+        y += lineHeight;
+    });
+    return y;
+}
+
+// Builds the full-detail report as a jsPDF document (see the <script> tag
+// for jspdf.umd.min.js loaded in index.html). Structure: title, Final
+// Conclusion (colored to match the on-site banner), the full article text,
+// Step 1 (each trained model run, with an agree/disagree note for "Compare
+// both"), and Step 2 (the official-source verdict with clickable source
+// links) - mirroring the on-page results card so the PDF is a complete,
+// standalone record of what a Reader saw.
+function buildReportPDF() {
+    if (!lastAnalysis || !window.jspdf) return null;
+    const { jsPDF } = window.jspdf;
+    const { text, officialResult, modelData, primaryResult, secondaryKey, secondaryResult, conclusion, timestamp } = lastAnalysis;
+
+    const doc = new jsPDF({ unit: 'pt', format: 'a4' });
+    const pageWidth = doc.internal.pageSize.getWidth();
+    const pageHeight = doc.internal.pageSize.getHeight();
+    const margin = 48;
+    const contentWidth = pageWidth - margin * 2;
+    let y = margin + 12;
+
+    // Title
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(17);
+    doc.setTextColor(45, 55, 72);
+    y = addPdfWrappedText(doc, 'Fake Health News Detection System — Analysis Report', margin, y, contentWidth, 22, margin, pageHeight);
+
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(9.5);
+    doc.setTextColor(160, 174, 192);
+    y = ensurePdfSpace(doc, y, 14, margin, pageHeight);
+    doc.text('Generated: ' + timestamp.toLocaleString(), margin, y);
+    y += 18;
+
+    doc.setDrawColor(226, 232, 240);
+    doc.line(margin, y, pageWidth - margin, y);
+    y += 22;
+
+    // Final Conclusion
+    const cleanLabel = conclusion.label.replace(/[✀-➿☀-⛿️]/g, '').trim();
+    const [bgR, bgG, bgB] = hexToRgb(conclusion.bg);
+    const [fgR, fgG, fgB] = hexToRgb(conclusion.fg);
+
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(8.5);
+    doc.setTextColor(160, 174, 192);
+    y = ensurePdfSpace(doc, y, 12, margin, pageHeight);
+    doc.text('FINAL CONCLUSION', margin, y);
+    y += 12;
+
+    y = ensurePdfSpace(doc, y, 36, margin, pageHeight);
+    doc.setFillColor(bgR, bgG, bgB);
+    doc.roundedRect(margin, y, contentWidth, 32, 6, 6, 'F');
+    doc.setTextColor(fgR, fgG, fgB);
+    doc.setFontSize(13);
+    doc.text(cleanLabel, margin + 14, y + 21);
+    y += 32 + 16;
+
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(10.5);
+    doc.setTextColor(74, 85, 104);
+    y = addPdfWrappedText(doc, conclusion.explanation, margin, y, contentWidth, 15, margin, pageHeight);
+    y += 18;
+
+    // Article text
+    y = ensurePdfSpace(doc, y, 20, margin, pageHeight);
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(11.5);
+    doc.setTextColor(45, 55, 72);
+    doc.text('Article Text', margin, y);
+    y += 17;
+    doc.setFont('helvetica', 'italic');
+    doc.setFontSize(10);
+    doc.setTextColor(74, 85, 104);
+    y = addPdfWrappedText(doc, '“' + text + '”', margin, y, contentWidth, 14, margin, pageHeight);
+    y += 20;
+
+    // Step 1 — Your Trained Model(s)
+    y = ensurePdfSpace(doc, y, 20, margin, pageHeight);
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(11.5);
+    doc.setTextColor(45, 55, 72);
+    doc.text('Step 1 — Your Trained Model(s)', margin, y);
+    y += 17;
+
+    Object.keys(modelData.results).forEach(key => {
+        const r = modelData.results[key];
+        const name = MODEL_DISPLAY_NAMES[key] || key;
+        const pct = typeof r.confidence === 'number' ? Math.round(r.confidence * 100) + '%' : 'n/a';
+        doc.setFont('helvetica', 'bold');
+        doc.setFontSize(10.5);
+        doc.setTextColor(45, 55, 72);
+        y = ensurePdfSpace(doc, y, 14, margin, pageHeight);
+        doc.text(`${name}: ${String(r.verdict).toUpperCase()} (confidence: ${pct})`, margin, y);
+        y += 14;
+        if (r.summary) {
+            doc.setFont('helvetica', 'normal');
+            doc.setFontSize(9.5);
+            doc.setTextColor(74, 85, 104);
+            y = addPdfWrappedText(doc, r.summary, margin + 12, y, contentWidth - 12, 13, margin, pageHeight);
+        }
+        y += 8;
+    });
+
+    if (secondaryKey && primaryResult && secondaryResult) {
+        const agree = primaryResult.verdict === secondaryResult.verdict;
+        doc.setFont('helvetica', 'italic');
+        doc.setFontSize(9.5);
+        doc.setTextColor(113, 128, 150);
+        y = addPdfWrappedText(
+            doc,
+            agree ? 'Both models agree.' : 'Models disagree — see the "Your Model(s)" tab on the site for the full comparison.',
+            margin, y, contentWidth, 13, margin, pageHeight
+        );
+    }
+    y += 10;
+
+    // Step 2 — Official Source Check
+    y = ensurePdfSpace(doc, y, 20, margin, pageHeight);
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(11.5);
+    doc.setTextColor(45, 55, 72);
+    y = addPdfWrappedText(doc, 'Step 2 — Official Source Check (LLM + BBC Health / KKM / WHO / CDC)', margin, y, contentWidth, 15, margin, pageHeight);
+    y += 4;
+
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(10.5);
+    doc.setTextColor(74, 85, 104);
+    y = ensurePdfSpace(doc, y, 14, margin, pageHeight);
+    doc.text('Verdict: ' + String(officialResult.verdict).toUpperCase(), margin, y);
+    y += 15;
+
+    if (officialResult.summary) {
+        doc.setFontSize(10);
+        y = addPdfWrappedText(doc, officialResult.summary, margin, y, contentWidth, 14, margin, pageHeight);
+        y += 8;
+    }
+
+    const sources = Array.isArray(officialResult.sources) ? officialResult.sources : [];
+    if (sources.length > 0) {
+        y = ensurePdfSpace(doc, y, 16, margin, pageHeight);
+        doc.setFont('helvetica', 'bold');
+        doc.setFontSize(10);
+        doc.setTextColor(45, 55, 72);
+        doc.text('Sources checked:', margin, y);
+        y += 14;
+        doc.setFont('helvetica', 'normal');
+        doc.setFontSize(9.5);
+        sources.forEach(src => {
+            const label = `• ${src.title || src.url} (${src.publisher || safeHostname(src.url)})`;
+            y = ensurePdfSpace(doc, y, 13, margin, pageHeight);
+            doc.setTextColor(45, 55, 72);
+            doc.textWithLink(label, margin, y, { url: src.url, maxWidth: contentWidth });
+            y += 13;
+        });
+    } else {
+        doc.setFont('helvetica', 'normal');
+        doc.setFontSize(9.5);
+        doc.setTextColor(113, 128, 150);
+        y = ensurePdfSpace(doc, y, 13, margin, pageHeight);
+        doc.text('No matching pages were found on BBC, KKM, WHO or CDC.', margin, y);
+    }
+
+    // Disclaimer + page numbers on every page
+    const pageCount = doc.internal.getNumberOfPages();
+    for (let i = 1; i <= pageCount; i++) {
+        doc.setPage(i);
+        doc.setFont('helvetica', 'normal');
+        doc.setFontSize(8);
+        doc.setTextColor(160, 174, 192);
+        doc.text('For research purposes only. Always consult healthcare professionals for medical advice.', margin, pageHeight - 24);
+        doc.text(`Page ${i} of ${pageCount}`, pageWidth - margin - 55, pageHeight - 24);
+    }
+
+    return doc;
+}
+
+function downloadResultPDF() {
+    if (!lastAnalysis) {
+        alert('Run an analysis first, then you can download its report.');
+        return;
+    }
+    if (!window.jspdf) {
+        alert("The PDF library didn't load (check your internet connection or an ad-blocker), so the report couldn't be generated as a PDF.");
+        return;
+    }
+    const doc = buildReportPDF();
+    if (doc) doc.save(`fake-health-news-report-${Date.now()}.pdf`);
+}
+
+// Draws a rounded rectangle path (no built-in ctx.roundRect fallback needed
+// this way) so the result card doesn't rely on a very recent Canvas API.
+function roundRect(ctx, x, y, w, h, r) {
+    ctx.beginPath();
+    ctx.moveTo(x + r, y);
+    ctx.arcTo(x + w, y, x + w, y + h, r);
+    ctx.arcTo(x + w, y + h, x, y + h, r);
+    ctx.arcTo(x, y + h, x, y, r);
+    ctx.arcTo(x, y, x + w, y, r);
+    ctx.closePath();
+}
+
+// Wraps text onto multiple canvas lines (fillText doesn't wrap on its own),
+// returning the y-coordinate after the last line drawn. If maxLines is hit
+// with text still remaining, the last line is truncated with an ellipsis.
+function wrapCanvasText(ctx, text, x, y, maxWidth, lineHeight, maxLines) {
+    const words = String(text).split(/\s+/);
+    let line = '';
+    let lineCount = 0;
+
+    for (let i = 0; i < words.length; i++) {
+        const testLine = line ? line + ' ' + words[i] : words[i];
+        if (ctx.measureText(testLine).width > maxWidth && line) {
+            lineCount++;
+            if (maxLines && lineCount >= maxLines) {
+                let truncated = line;
+                while (ctx.measureText(truncated + '…').width > maxWidth && truncated.length > 0) {
+                    truncated = truncated.slice(0, -1);
+                }
+                ctx.fillText(truncated + '…', x, y);
+                return y + lineHeight;
+            }
+            ctx.fillText(line, x, y);
+            y += lineHeight;
+            line = words[i];
+        } else {
+            line = testLine;
+        }
+    }
+    if (line) {
+        ctx.fillText(line, x, y);
+        y += lineHeight;
+    }
+    return y;
+}
+
+// Renders the current result onto an off-screen canvas as a shareable,
+// social-card-style image and resolves with it as a PNG Blob. Used by both
+// "Download Image" and the Web Share API path (so a shared post can carry
+// the image itself, not just a text summary).
+function generateResultImageBlob() {
+    return new Promise((resolve, reject) => {
+        if (!lastAnalysis) {
+            reject(new Error('No analysis to render yet.'));
+            return;
+        }
+        const { conclusion, officialResult, primaryResult, primaryKey, text, timestamp } = lastAnalysis;
+
+        const width = 1200;
+        const height = 675;
+        const canvas = document.createElement('canvas');
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext('2d');
+        if (!ctx) {
+            reject(new Error('Canvas is not supported in this browser.'));
+            return;
+        }
+
+        // Background
+        const bgGradient = ctx.createLinearGradient(0, 0, width, height);
+        bgGradient.addColorStop(0, '#667eea');
+        bgGradient.addColorStop(1, '#764ba2');
+        ctx.fillStyle = bgGradient;
+        ctx.fillRect(0, 0, width, height);
+
+        // Card
+        const pad = 48;
+        ctx.fillStyle = '#ffffff';
+        roundRect(ctx, pad, pad, width - pad * 2, height - pad * 2, 24);
+        ctx.fill();
+
+        // Header
+        ctx.fillStyle = '#2d3748';
+        ctx.font = '700 30px Inter, Arial, sans-serif';
+        ctx.textBaseline = 'alphabetic';
+        ctx.fillText('🏥 Fake Health News Detection System', pad + 40, pad + 60);
+        ctx.fillStyle = '#a0aec0';
+        ctx.font = '400 16px Inter, Arial, sans-serif';
+        ctx.fillText('LLM-powered official-source verification', pad + 40, pad + 86);
+
+        // Final conclusion badge
+        const badgeText = conclusion.label;
+        ctx.font = '700 26px Inter, Arial, sans-serif';
+        const maxBadgeWidth = width - pad * 2 - 80;
+        let badgeTextWidth = ctx.measureText(badgeText).width;
+        const badgeX = pad + 40;
+        const badgeY = pad + 118;
+        const badgeW = Math.min(badgeTextWidth + 60, maxBadgeWidth);
+        const badgeH = 64;
+        ctx.fillStyle = conclusion.bg;
+        roundRect(ctx, badgeX, badgeY, badgeW, badgeH, 32);
+        ctx.fill();
+        ctx.fillStyle = conclusion.fg;
+        ctx.fillText(badgeText, badgeX + 30, badgeY + 41, badgeW - 60);
+
+        // Explanation (wrapped)
+        ctx.fillStyle = '#4a5568';
+        ctx.font = '400 18px Inter, Arial, sans-serif';
+        let y = badgeY + badgeH + 44;
+        y = wrapCanvasText(ctx, conclusion.explanation, pad + 40, y, maxBadgeWidth, 26, 3);
+
+        // Article snippet (wrapped)
+        y += 16;
+        ctx.fillStyle = '#718096';
+        ctx.font = '600 14px Inter, Arial, sans-serif';
+        ctx.fillText('ARTICLE (EXCERPT)', pad + 40, y);
+        y += 26;
+        ctx.fillStyle = '#2d3748';
+        ctx.font = 'italic 400 18px Inter, Arial, sans-serif';
+        const snippet = '"' + text.slice(0, 320) + (text.length > 320 ? '…"' : '"');
+        wrapCanvasText(ctx, snippet, pad + 40, y, maxBadgeWidth, 26, 3);
+
+        // Footer strip: model + official verdict chips
+        const footerY = height - pad - 60;
+        ctx.fillStyle = '#f7fafc';
+        roundRect(ctx, pad + 40, footerY, width - pad * 2 - 80, 44, 10);
+        ctx.fill();
+        ctx.fillStyle = '#4a5568';
+        ctx.font = '600 15px Inter, Arial, sans-serif';
+        const modelName = MODEL_DISPLAY_NAMES[primaryKey] || primaryKey;
+        const modelPct = primaryResult && typeof primaryResult.confidence === 'number'
+            ? Math.round(primaryResult.confidence * 100) + '%' : 'n/a';
+        const modelVerdictText = primaryResult ? String(primaryResult.verdict).toUpperCase() : 'N/A';
+        const officialLabel = verdictMeta(officialResult.verdict).badgeText;
+        ctx.fillText(
+            `${modelName}: ${modelVerdictText} (${modelPct})   ·   Official check: ${officialLabel}`,
+            pad + 56, footerY + 28, width - pad * 2 - 112
+        );
+
+        // Timestamp
+        ctx.fillStyle = '#a0aec0';
+        ctx.font = '400 13px Inter, Arial, sans-serif';
+        ctx.textAlign = 'right';
+        ctx.fillText(timestamp.toLocaleString(), width - pad - 40, height - pad - 20);
+        ctx.textAlign = 'left';
+
+        canvas.toBlob(blob => {
+            if (blob) resolve(blob);
+            else reject(new Error('Canvas could not be exported as an image.'));
+        }, 'image/png');
+    });
+}
+
+async function downloadResultImage() {
+    if (!lastAnalysis) {
+        alert('Run an analysis first, then you can download its result card.');
+        return;
+    }
+    try {
+        const blob = await generateResultImageBlob();
+        triggerDownload(blob, `fake-health-news-result-${Date.now()}.png`);
+    } catch (err) {
+        alert('Could not generate the result image: ' + err.message);
+    }
+}
+
+function buildShareText() {
+    if (!lastAnalysis) return '';
+    const { conclusion, text } = lastAnalysis;
+    const cleanLabel = conclusion.label.replace(/[✀-➿☀-⛿️]/g, '').trim();
+    const snippet = text.length > 120 ? text.slice(0, 120) + '…' : text;
+    return `Fake Health News Detector says: ${cleanLabel}\n"${snippet}"\n\nChecked against BBC Health, KKM, WHO & CDC.`;
+}
+
+// The "Share" button's dropdown: platform share-intent links plus a
+// "share via device" option (see shareViaWebShare) and a copy-to-clipboard
+// fallback. A static/serverless site has no backend to mint a persistent
+// per-result URL, so what gets shared is the text summary (and, for the
+// device share sheet, the result-card image too) rather than a link back to
+// this specific result.
+function toggleShareMenu(event) {
+    event.stopPropagation();
+    if (!lastAnalysis) {
+        alert('Run an analysis first, then you can share its result.');
+        return;
+    }
+    const menu = document.getElementById('shareMenu');
+    const wasHidden = menu.hidden;
+    closeShareMenu();
+    if (!wasHidden) return;
+
+    const shareText = buildShareText();
+    const pageUrl = location.href.split('#')[0];
+    document.getElementById('shareTwitter').href =
+        'https://twitter.com/intent/tweet?text=' + encodeURIComponent(shareText) + '&url=' + encodeURIComponent(pageUrl);
+    document.getElementById('shareFacebook').href =
+        'https://www.facebook.com/sharer/sharer.php?u=' + encodeURIComponent(pageUrl) + '&quote=' + encodeURIComponent(shareText);
+    document.getElementById('shareWhatsapp').href =
+        'https://wa.me/?text=' + encodeURIComponent(shareText + '\n\n' + pageUrl);
+
+    menu.hidden = false;
+    document.addEventListener('click', closeShareMenuOnOutsideClick);
+}
+
+function closeShareMenu() {
+    const menu = document.getElementById('shareMenu');
+    if (menu) menu.hidden = true;
+    document.removeEventListener('click', closeShareMenuOnOutsideClick);
+}
+
+function closeShareMenuOnOutsideClick(e) {
+    const wrapper = document.querySelector('.share-menu-wrapper');
+    if (wrapper && !wrapper.contains(e.target)) closeShareMenu();
+}
+
+// Tries the device's native share sheet first (works well on mobile Chrome
+// and Safari, and desktop Safari/Edge) - attaching the result-card image itself
+// where the platform supports sharing files, not just text. Falls back to
+// copying the text summary to the clipboard if Web Share isn't supported at
+// all; the platform link menu (toggleShareMenu) covers browsers in between.
+async function shareViaWebShare() {
+    if (!lastAnalysis) return;
+    closeShareMenu();
+    const shareText = buildShareText();
+
+    try {
+        const blob = await generateResultImageBlob();
+        const file = new File([blob], 'fake-health-news-result.png', { type: 'image/png' });
+        if (navigator.canShare && navigator.canShare({ files: [file] })) {
+            await navigator.share({ files: [file], title: 'Fake Health News Detection Result', text: shareText });
+            return;
+        }
+    } catch (err) {
+        if (err && err.name === 'AbortError') return;
+        // Fall through to text-only share / manual fallback below.
+    }
+
+    if (navigator.share) {
+        try {
+            await navigator.share({ title: 'Fake Health News Detection Result', text: shareText, url: location.href });
+            return;
+        } catch (err) {
+            if (err && err.name === 'AbortError') return;
+        }
+    }
+
+    copyShareText();
+    alert("Your browser doesn't support direct sharing, so the summary was copied to your clipboard instead — paste it wherever you'd like to share it, or use one of the platform links in the Share menu.");
+}
+
+// Instagram has no web share-intent URL like Twitter/Facebook/WhatsApp - it
+// deliberately doesn't support pre-filled posts from outside its own app,
+// for any account. The honest, functional equivalent: download the same
+// result-card image used elsewhere and copy the caption, so the Reader can
+// paste both into a new Instagram post or Story in a couple of taps.
+async function shareToInstagram() {
+    closeShareMenu();
+    if (!lastAnalysis) return;
+    try {
+        const blob = await generateResultImageBlob();
+        triggerDownload(blob, `fake-health-news-result-${Date.now()}.png`);
+    } catch (err) {
+        // If the image failed to generate, still offer the caption text below.
+    }
+    copyShareText();
+    alert('Instagram doesn\'t allow posts to be pre-filled from a website, so the result image has been downloaded and the caption copied to your clipboard. Open Instagram, start a new post or Story with that image, then paste the caption.');
+}
+
+function copyShareText() {
+    if (!lastAnalysis) return;
+    const shareText = buildShareText();
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(shareText).then(() => {
+            closeShareMenu();
+        }).catch(() => {
+            fallbackCopy(shareText);
+        });
+    } else {
+        fallbackCopy(shareText);
+    }
+}
+
+function fallbackCopy(str) {
+    const textarea = document.createElement('textarea');
+    textarea.value = str;
+    textarea.style.position = 'fixed';
+    textarea.style.opacity = '0';
+    document.body.appendChild(textarea);
+    textarea.select();
+    try { document.execCommand('copy'); } catch (e) { /* clipboard unavailable - nothing more we can do */ }
+    document.body.removeChild(textarea);
+    closeShareMenu();
 }

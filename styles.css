@@ -605,6 +605,94 @@ body {
     border-bottom: 1px solid #e2e8f0;
 }
 
+/* Download / Share actions (below the Final Conclusion banner) */
+.share-actions {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    align-items: center;
+    gap: 0.75rem;
+    padding: 0 2rem 1.5rem;
+    background: linear-gradient(135deg, #f7fafc 0%, #edf2f7 100%);
+    border-bottom: 1px solid #e2e8f0;
+}
+
+.share-action-btn {
+    padding: 0.6rem 1.25rem;
+    border: 2px solid #e2e8f0;
+    background: white;
+    color: #4a5568;
+    border-radius: 20px;
+    font-size: 0.85rem;
+    font-weight: 600;
+    font-family: inherit;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+
+.share-action-btn:hover {
+    border-color: #667eea;
+    color: #667eea;
+    transform: translateY(-1px);
+}
+
+.share-action-btn.share-btn {
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    border-color: transparent;
+    color: white;
+}
+
+.share-action-btn.share-btn:hover {
+    color: white;
+    opacity: 0.9;
+}
+
+.share-menu-wrapper {
+    position: relative;
+}
+
+.share-menu {
+    position: absolute;
+    top: calc(100% + 0.5rem);
+    left: 50%;
+    transform: translateX(-50%);
+    background: white;
+    border: 1px solid #e2e8f0;
+    border-radius: 14px;
+    box-shadow: 0 10px 30px rgba(0,0,0,0.15);
+    padding: 0.5rem;
+    display: flex;
+    flex-direction: column;
+    min-width: 210px;
+    z-index: 100;
+}
+
+.share-menu[hidden] {
+    display: none;
+}
+
+.share-menu a,
+.share-menu button {
+    display: block;
+    padding: 0.6rem 0.9rem;
+    border: none;
+    background: none;
+    color: #4a5568;
+    font-size: 0.85rem;
+    font-family: inherit;
+    text-align: left;
+    text-decoration: none;
+    border-radius: 8px;
+    cursor: pointer;
+    transition: background 0.15s;
+}
+
+.share-menu a:hover,
+.share-menu button:hover {
+    background: #f7fafc;
+    color: #667eea;
+}
+
 /* Tabs */
 .tabs {
     display: flex;
