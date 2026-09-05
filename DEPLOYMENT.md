@@ -56,6 +56,10 @@ parsing, source filtering, graceful failure). Once deployed, check:
   in `FEEDS` at the top of `api/news.js` — each of the three feeds (BBC,
   WHO, CDC) fails independently, so even one broken feed still leaves the
   others showing.
+- **Translate controls** (Input Card and Results Card — see "Translation
+  feature" below): try translating a result to any language. Uses the same
+  `OPENAI_API_KEY` and model as the Official Check, so if that tab works,
+  this should too.
 
 If either errors, check Vercel → your project → Deployments → latest → Logs
 → find the relevant function (`verify` or `news`) → the `detail` field in
@@ -291,22 +295,16 @@ the global-stats line stays hidden.
      Redis" in Vercel's Marketplace) → follow the prompts. Vercel wires the
      two env vars below into your project automatically when you connect it
      this way — skip to step 3.
-   - **Directly at [console.upstash.com](https://console.upstash.com)**:
-     sign up (free, no credit card needed for the free tier) → click the
-     **Redis** tab → **+ Create Database** → give it a name → pick
-     **Regional** as the type (simplest choice — Global works on the free
-     tier too, but only replicates to one extra read region there and adds
-     complexity this project doesn't need) → pick a region close to where
-     your Vercel deployment runs → **Create**.
+   - **Directly at [upstash.com](https://upstash.com)**: sign up (free),
+     click **Create Database**, pick the **Regional** type (not Global —
+     Regional is on Upstash's free tier; Global isn't) and a region close to
+     where your Vercel deployment runs, then create it.
 2. On the database's own page (skip this if Vercel connected it for you in
-   step 1): open the **Connect** section → **REST** tab. You'll see
-   `UPSTASH_REDIS_REST_URL` and `UPSTASH_REDIS_REST_TOKEN` listed directly
-   (hover either field for a copy button) — copy both.
+   step 1), find its **REST API** section and copy:
+   - `UPSTASH_REDIS_REST_URL`
+   - `UPSTASH_REDIS_REST_TOKEN`
 3. Set both as environment variables on your deployment platform (same
    place you set `OPENAI_API_KEY` and `HF_SPACE_URL` — see `.env.example`).
-   Do this *before* your next deploy if you can — env vars only apply to
-   deployments made after they're set, so adding them after you've already
-   deployed means triggering one more redeploy afterward.
 4. Redeploy. No code changes needed beyond what's already in this repo —
    `api/share.js`, `api/result.js`, and `api/stats.js` pick these up
    automatically once they're set.
@@ -339,3 +337,28 @@ the global-stats line stays hidden.
   pushed, double check `vercel.json` made it into the repo — that rewrite
   is what makes the pretty URL work at all; without it, only
   `/api/result?id=<id>` (the raw JSON endpoint) would respond.
+
+## Translation feature (no extra setup needed)
+
+Two small controls, both backed by `api/translate.js`:
+
+- **Input Card → "🌐 Translate to English"** — translates whatever's in the
+  claim textarea to English in place (auto-detecting the source language),
+  since the trained model and the official-source checker are both
+  English-only. A "↩️ Show original" button appears afterwards to undo it.
+- **Results Card → "🌐 Translate result"** — translates the verdict label,
+  its plain-language explanation, and the official-source summary into a
+  language picked from the dropdown (Bahasa Malaysia, Chinese, Tamil, and
+  several others). The claim text and the cited sources are left as-is —
+  only this narration is translated. A "Show English" button reverts it.
+
+Unlike the fact-check itself, translation never calls `web_search` — it's a
+plain text-in/text-out call to the same `gpt-4.1-mini` model already
+configured via `OPENAI_API_KEY` (see `api/verify.js`'s setup notes above).
+**There is nothing extra to set up or deploy** — if `OPENAI_API_KEY` is
+already set for the Official Check feature, translation works too.
+
+If either button shows a "Translation failed" message once deployed, it's
+almost certainly the same `OPENAI_API_KEY` / model-name issue covered in
+the "please test both live" section above — check the same Vercel function
+logs, this time for the `translate` function.

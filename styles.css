@@ -338,42 +338,6 @@ body {
     margin-bottom: 2rem;
 }
 
-/* Shown at the top of the page when opened via a shared /result/<id> link
-   (see script.js's loadSharedResult / renderSharedResult). */
-.shared-result-notice {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: center;
-    justify-content: space-between;
-    gap: 0.75rem;
-    background: linear-gradient(135deg, #ebf4ff 0%, #e9d8fd 100%);
-    border: 1px solid #c3dafe;
-    border-radius: 14px;
-    padding: 1rem 1.3rem;
-    margin-bottom: 1.5rem;
-    font-size: 0.9rem;
-    color: #434190;
-}
-
-.shared-result-notice button {
-    background: white;
-    border: 1px solid #c3dafe;
-    color: #434190;
-    padding: 0.5rem 1rem;
-    border-radius: 20px;
-    font-size: 0.85rem;
-    font-weight: 600;
-    font-family: inherit;
-    cursor: pointer;
-    transition: all 0.2s;
-    white-space: nowrap;
-}
-
-.shared-result-notice button:hover {
-    background: #434190;
-    color: white;
-}
-
 .card-header {
     background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
     color: white;
@@ -729,6 +693,75 @@ body {
     color: #667eea;
 }
 
+/* Translate controls (Input Card's "Translate to English" and the Results
+   Card's "Translate result" language picker - see api/translate.js) */
+.translate-row {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.6rem;
+    margin: 0.75rem 0;
+}
+
+#translateResultRow {
+    justify-content: center;
+    padding: 0 2rem 1rem;
+    background: linear-gradient(135deg, #f7fafc 0%, #edf2f7 100%);
+}
+
+.translate-label {
+    font-size: 0.85rem;
+    font-weight: 600;
+    color: #4a5568;
+}
+
+.translate-row select {
+    padding: 0.5rem 0.75rem;
+    border: 2px solid #e2e8f0;
+    border-radius: 10px;
+    background: white;
+    color: #2d3748;
+    font-size: 0.85rem;
+    font-family: inherit;
+    cursor: pointer;
+}
+
+.translate-btn {
+    padding: 0.5rem 1rem;
+    border: 2px solid #e2e8f0;
+    background: white;
+    color: #4a5568;
+    border-radius: 20px;
+    font-size: 0.8rem;
+    font-weight: 600;
+    font-family: inherit;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+
+.translate-btn:hover {
+    border-color: #667eea;
+    color: #667eea;
+    transform: translateY(-1px);
+}
+
+.translate-btn:disabled {
+    opacity: 0.6;
+    cursor: default;
+    transform: none;
+}
+
+.translate-btn.translate-revert-btn {
+    border-color: transparent;
+    background: #edf2f7;
+}
+
+.translate-status {
+    font-size: 0.8rem;
+    color: #718096;
+    min-height: 1em;
+}
+
 /* Tabs */
 .tabs {
     display: flex;
@@ -929,19 +962,6 @@ body {
 
 .reset-btn:hover {
     background: #cbd5e0;
-}
-
-/* Site-wide stats line (api/stats.js), shown above the per-browser stat
-   cards below it - see script.js's loadGlobalStats. */
-.global-stats-line {
-    background: #f7fafc;
-    border: 1px solid #e2e8f0;
-    border-radius: 10px;
-    padding: 0.6rem 1rem;
-    margin-bottom: 1.25rem;
-    font-size: 0.85rem;
-    color: #4a5568;
-    text-align: center;
 }
 
 .stats-grid {

@@ -120,6 +120,16 @@
 Example:
 "BREAKING: Scientists discover that drinking warm lemon water every morning completely eliminates toxins from the body. This miracle cure has been hidden by pharmaceutical companies to protect their profits. Share this before they delete it!"'></textarea>
 
+                        <!-- Claims aren't always pasted in English (e.g. a Malay or Chinese
+                             WhatsApp forward) but the trained model and official-source
+                             checker both expect English - this translates in place before
+                             analysis. See script.js's translateClaimInput(). -->
+                        <div class="translate-row">
+                            <button type="button" class="translate-btn" id="translateInputBtn" onclick="translateClaimInput()">🌐 Translate to English</button>
+                            <button type="button" class="translate-btn translate-revert-btn" id="revertInputBtn" onclick="revertClaimInput()" hidden>↩️ Show original</button>
+                            <span id="translateInputStatus" class="translate-status"></span>
+                        </div>
+
                         <div class="examples">
                             <span class="examples-label">📌 Quick Examples:</span>
                             <button class="example-btn fake-example" onclick="setExample('fake')">⚠️ Fake News</button>
@@ -167,6 +177,34 @@ Example:
                     <!-- Verdict Banner -->
                     <div id="resultBanner" class="ensemble-banner"></div>
 
+                    <!-- Read the verdict/explanation/summary above back in another
+                         language - the claim itself is still analyzed in whatever
+                         language it was submitted in. See script.js's
+                         translateResultTo(). -->
+                    <div class="translate-row" id="translateResultRow">
+                        <label for="resultLanguage" class="translate-label">🌐 Translate result:</label>
+                        <select id="resultLanguage">
+                            <option value="" selected disabled>Select language…</option>
+                            <option value="Malay">Bahasa Malaysia</option>
+                            <option value="Indonesian">Bahasa Indonesia</option>
+                            <option value="Chinese (Simplified)">Chinese (Simplified)</option>
+                            <option value="Chinese (Traditional)">Chinese (Traditional)</option>
+                            <option value="Tamil">Tamil</option>
+                            <option value="Hindi">Hindi</option>
+                            <option value="Arabic">Arabic</option>
+                            <option value="Spanish">Spanish</option>
+                            <option value="French">French</option>
+                            <option value="Japanese">Japanese</option>
+                            <option value="Korean">Korean</option>
+                            <option value="Vietnamese">Vietnamese</option>
+                            <option value="Thai">Thai</option>
+                            <option value="English">English (original)</option>
+                        </select>
+                        <button type="button" class="translate-btn" id="translateResultBtn" onclick="handleTranslateResultClick()">Translate</button>
+                        <button type="button" class="translate-btn translate-revert-btn" id="revertResultBtn" onclick="revertResultTranslation()" hidden>Show English</button>
+                        <span id="translateResultStatus" class="translate-status"></span>
+                    </div>
+
                     <!-- Download / Share Actions -->
                     <div class="share-actions">
                         <button class="share-action-btn" onclick="downloadResultImage()" title="Download a shareable image card of this result">
@@ -184,7 +222,6 @@ Example:
                                 <a id="shareTwitter" href="#" target="_blank" rel="noopener noreferrer">🐦 X / Twitter</a>
                                 <a id="shareFacebook" href="#" target="_blank" rel="noopener noreferrer">📘 Facebook</a>
                                 <a id="shareWhatsapp" href="#" target="_blank" rel="noopener noreferrer">💬 WhatsApp</a>
-                                <button type="button" onclick="shareToInstagram()">📸 Instagram</button>
                                 <button type="button" onclick="copyShareText()">📋 Copy summary text</button>
                             </div>
                         </div>

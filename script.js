@@ -22,6 +22,13 @@ const FAKE_KEYWORDS = [
 
 let predictionHistory = [];
 
+// Translation UI state (see api/translate.js and the "Translation" section
+// further down). `resultTranslationState` is reset every time a fresh
+// verdict banner is rendered (new analysis, or a loaded /result/<id> page),
+// since the DOM nodes it points at get rebuilt from scratch each time.
+let resultTranslationState = { originals: null, activeLanguage: null };
+let claimTranslationState = { original: null };
+
 // Where the "Latest from Official Health Sources" panel gets its data (see
 // api/news.js). Same same-origin-by-default convention as VERIFY_API_URL.
 const NEWS_API_URL = '/api/news';
@@ -40,6 +47,12 @@ const MODEL_API_URL = '/api/predict';
 const SHARE_API_URL = '/api/share';
 const RESULT_API_URL = '/api/result';
 const STATS_API_URL = '/api/stats';
+
+// Powers both the Input Card's "Translate to English" button and the
+// Results Card's "Translate result" control (see api/translate.js). Same
+// same-origin-by-default convention as the other *_API_URL constants, and
+// the same OPENAI_API_KEY as VERIFY_API_URL - nothing extra to configure.
+const TRANSLATE_API_URL = '/api/translate';
 
 // Initialize tabs
 document.addEventListener('DOMContentLoaded', () => {
@@ -247,6 +260,12 @@ function computeFinalConclusion(modelResult, officialResult) {
 // LLM independently rechecking the article against official sources. The
 // agreement badge compares the two rather than just listing them side by side.
 function renderBanner(officialResult, modelResult) {
+    // A fresh banner means brand-new DOM nodes for the label/explanation/
+    // summary text below, so any translation applied to the previous
+    // result's nodes is now stale - drop it rather than leaving a "Show
+    // English" button pointing at elements that no longer reflect it.
+    resetResultTranslationUI();
+
     const banner = document.getElementById('resultBanner');
     const officialMeta = verdictMeta(officialResult.verdict);
     const officialConfidencePct = typeof officialResult.confidence === 'number'
@@ -264,9 +283,9 @@ function renderBanner(officialResult, modelResult) {
         <div style="text-align: center;">
             <div style="font-size:0.8rem;color:#a0aec0;text-transform:uppercase;letter-spacing:0.05em;margin-bottom:0.5rem;">Final Conclusion</div>
             <div class="prediction-badge" style="background:${conclusion.bg};color:${conclusion.fg};font-size:1.5rem;padding:0.75rem 1.5rem;">
-                ${conclusion.label}
+                <span id="conclusionLabel">${conclusion.label}</span>
             </div>
-            <p style="max-width:600px;margin:0.75rem auto 0;color:#4a5568;font-size:0.95rem;">${escapeHtml(conclusion.explanation)}</p>
+            <p id="conclusionExplanation" style="max-width:600px;margin:0.75rem auto 0;color:#4a5568;font-size:0.95rem;">${escapeHtml(conclusion.explanation)}</p>
 
             <details style="max-width:600px;margin:1.5rem auto 0;text-align:left;">
                 <summary style="cursor:pointer;text-align:center;color:#718096;font-size:0.85rem;text-transform:uppercase;letter-spacing:0.05em;">How this was reached</summary>
@@ -286,7 +305,7 @@ function renderBanner(officialResult, modelResult) {
                     </div>
                     ${officialConfidencePct !== null ? `<div style="font-size:0.9rem;color:#4a5568;margin-top:0.25rem;">${officialConfidencePct}% confidence</div>` : ''}
 
-                    <p style="max-width:600px;margin:1rem auto 0;color:#4a5568;">${escapeHtml(officialResult.summary || '')}</p>
+                    <p id="officialSummaryBanner" style="max-width:600px;margin:1rem auto 0;color:#4a5568;">${escapeHtml(officialResult.summary || '')}</p>
                 </div>
             </details>
         </div>
@@ -307,7 +326,7 @@ function renderOfficialCheck(result) {
     container.innerHTML = `
         <div class="official-check">
             <div class="verdict-badge ${result.verdict}">${meta.badgeText}</div>
-            <p class="official-summary">${result.summary ? escapeHtml(result.summary) : 'No summary returned.'}</p>
+            <p id="officialSummaryTab" class="official-summary">${result.summary ? escapeHtml(result.summary) : 'No summary returned.'}</p>
             ${sources.length > 0 ? `
                 <h4 style="margin-top:1.5rem;">📎 Sources checked</h4>
                 <div class="source-list">
@@ -322,6 +341,177 @@ function renderOfficialCheck(result) {
             ${result.raw ? `<details style="margin-top:1rem;"><summary style="cursor:pointer;color:#718096;font-size:0.85rem;">Raw model output</summary><pre style="white-space:pre-wrap;font-size:0.8rem;color:#4a5568;">${escapeHtml(result.raw)}</pre></details>` : ''}
         </div>
     `;
+}
+
+// ============================================================================
+// Translation (api/translate.js) - lets a visitor read the verdict back in
+// another language, and lets a claim submitted in another language still be
+// analyzed. Both directions go through the same small endpoint; only the
+// direction (which text(s), which target language) differs.
+// ============================================================================
+
+// Called every time renderBanner() rebuilds the results DOM, since the
+// nodes any previous translation touched no longer exist.
+function resetResultTranslationUI() {
+    resultTranslationState = { originals: null, activeLanguage: null };
+    const select = document.getElementById('resultLanguage');
+    const revertBtn = document.getElementById('revertResultBtn');
+    const status = document.getElementById('translateResultStatus');
+    if (select) select.value = '';
+    if (revertBtn) revertBtn.hidden = true;
+    if (status) status.textContent = '';
+}
+
+function handleTranslateResultClick() {
+    const select = document.getElementById('resultLanguage');
+    const targetLanguage = select ? select.value : '';
+    if (!targetLanguage) {
+        alert('Pick a language from the dropdown first.');
+        return;
+    }
+    translateResultTo(targetLanguage);
+}
+
+// Translates the verdict label, its plain-language explanation, and the
+// official-source summary (both places it appears - the collapsed "How
+// this was reached" panel and the Official Check tab) in one request, then
+// swaps them into the existing DOM nodes in place. The underlying claim
+// text and sources are left untouched - only this human-readable narration
+// is translated.
+async function translateResultTo(targetLanguage) {
+    if (!lastAnalysis) return;
+
+    const label = document.getElementById('conclusionLabel');
+    const explanation = document.getElementById('conclusionExplanation');
+    const bannerSummary = document.getElementById('officialSummaryBanner');
+    const tabSummary = document.getElementById('officialSummaryTab');
+    if (!label || !explanation) return;
+
+    // Cache the English originals once, the first time this result is
+    // translated, so switching between languages (or reverting) never
+    // translates an already-translated string.
+    if (!resultTranslationState.originals) {
+        resultTranslationState.originals = {
+            label: label.textContent,
+            explanation: explanation.textContent,
+            bannerSummary: bannerSummary ? bannerSummary.textContent : '',
+            tabSummary: tabSummary ? tabSummary.textContent : ''
+        };
+    }
+
+    if (targetLanguage === 'English') {
+        revertResultTranslation();
+        return;
+    }
+
+    const status = document.getElementById('translateResultStatus');
+    const button = document.getElementById('translateResultBtn');
+    if (status) status.textContent = '🌐 Translating…';
+    if (button) button.disabled = true;
+
+    const o = resultTranslationState.originals;
+    try {
+        const response = await fetch(TRANSLATE_API_URL, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                texts: [o.label, o.explanation, o.bannerSummary, o.tabSummary],
+                targetLanguage
+            })
+        });
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok) throw new Error(data.error || `Request failed (${response.status})`);
+
+        const [tLabel, tExplanation, tBannerSummary, tTabSummary] = data.translations || [];
+        if (tLabel) label.textContent = tLabel;
+        if (tExplanation) explanation.textContent = tExplanation;
+        if (bannerSummary && tBannerSummary) bannerSummary.textContent = tBannerSummary;
+        if (tabSummary && tTabSummary) tabSummary.textContent = tTabSummary;
+
+        resultTranslationState.activeLanguage = targetLanguage;
+        if (status) status.textContent = `Showing in ${targetLanguage}`;
+        const revertBtn = document.getElementById('revertResultBtn');
+        if (revertBtn) revertBtn.hidden = false;
+    } catch (err) {
+        if (status) status.textContent = `Translation failed: ${err.message || err}`;
+    } finally {
+        if (button) button.disabled = false;
+    }
+}
+
+function revertResultTranslation() {
+    if (!resultTranslationState.originals) return;
+    const o = resultTranslationState.originals;
+    const label = document.getElementById('conclusionLabel');
+    const explanation = document.getElementById('conclusionExplanation');
+    const bannerSummary = document.getElementById('officialSummaryBanner');
+    const tabSummary = document.getElementById('officialSummaryTab');
+
+    if (label) label.textContent = o.label;
+    if (explanation) explanation.textContent = o.explanation;
+    if (bannerSummary) bannerSummary.textContent = o.bannerSummary;
+    if (tabSummary) tabSummary.textContent = o.tabSummary;
+
+    resultTranslationState.activeLanguage = null;
+    const select = document.getElementById('resultLanguage');
+    const revertBtn = document.getElementById('revertResultBtn');
+    const status = document.getElementById('translateResultStatus');
+    if (select) select.value = '';
+    if (revertBtn) revertBtn.hidden = true;
+    if (status) status.textContent = '';
+}
+
+// Translates whatever's currently in the claim textarea to English in
+// place, so the trained model and official-source checker (both English-
+// only) can still analyze a claim that was pasted in another language.
+// Auto-detects the source language - the visitor doesn't need to say what
+// it's in.
+async function translateClaimInput() {
+    const textarea = document.getElementById('newsText');
+    if (!textarea || !textarea.value.trim()) {
+        alert('Paste or type a claim first.');
+        return;
+    }
+
+    const status = document.getElementById('translateInputStatus');
+    const button = document.getElementById('translateInputBtn');
+    if (status) status.textContent = '🌐 Translating…';
+    if (button) button.disabled = true;
+
+    const original = textarea.value;
+    try {
+        const response = await fetch(TRANSLATE_API_URL, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ text: original, targetLanguage: 'English' })
+        });
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok) throw new Error(data.error || `Request failed (${response.status})`);
+
+        const translated = (data.translations && data.translations[0]) || '';
+        if (!translated.trim()) throw new Error('Empty translation returned.');
+
+        claimTranslationState.original = original;
+        textarea.value = translated;
+        if (status) status.textContent = 'Translated to English.';
+        const revertBtn = document.getElementById('revertInputBtn');
+        if (revertBtn) revertBtn.hidden = false;
+    } catch (err) {
+        if (status) status.textContent = `Translation failed: ${err.message || err}`;
+    } finally {
+        if (button) button.disabled = false;
+    }
+}
+
+function revertClaimInput() {
+    if (claimTranslationState.original === null) return;
+    const textarea = document.getElementById('newsText');
+    if (textarea) textarea.value = claimTranslationState.original;
+    claimTranslationState.original = null;
+    const revertBtn = document.getElementById('revertInputBtn');
+    const status = document.getElementById('translateInputStatus');
+    if (revertBtn) revertBtn.hidden = true;
+    if (status) status.textContent = '';
 }
 
 // ============================================================================
@@ -1396,7 +1586,7 @@ async function downloadResultImage() {
 
 // Posts the current result to api/share.js the first time it's actually
 // needed and caches the resulting URL on lastAnalysis, so repeat clicks
-// across Twitter/Facebook/WhatsApp/Instagram/copy/Web-Share within the same
+// across Twitter/Facebook/WhatsApp/copy/Web-Share within the same
 // result all reuse one link instead of minting a new database entry each
 // time. Returns null (rather than throwing) if the backend isn't
 // configured or the request fails - every caller already knows to fall
@@ -1430,8 +1620,8 @@ async function getOrCreateShareLink() {
 }
 
 // `url` is embedded directly in the returned text (rather than left as a
-// separate field) so it survives being pasted into WhatsApp, Instagram
-// captions, or a clipboard paste - anywhere that doesn't have its own
+// separate field) so it survives being pasted into WhatsApp captions, or
+// a clipboard paste - anywhere that doesn't have its own
 // dedicated "link" slot the way Web Share's `url` field or Twitter/
 // Facebook's `url=` parameter do.
 function buildShareText(url) {
@@ -1540,25 +1730,6 @@ async function shareViaWebShare() {
         ? "Your browser doesn't support direct sharing, so the summary was copied to your clipboard and the result-card image was downloaded — paste the text and attach the image wherever you'd like to share it."
         : "Your browser doesn't support direct sharing, so the summary was copied to your clipboard instead — paste it wherever you'd like to share it, or use one of the platform links in the Share menu."
     );
-}
-
-// Instagram has no web share-intent URL like Twitter/Facebook/WhatsApp - it
-// deliberately doesn't support pre-filled posts from outside its own app,
-// for any account. The honest, functional equivalent: download the same
-// result-card image used elsewhere and copy the caption (with the real
-// permalink embedded in it, when one's available), so the Reader can paste
-// both into a new Instagram post or Story in a couple of taps.
-async function shareToInstagram() {
-    closeShareMenu();
-    if (!lastAnalysis) return;
-    try {
-        const blob = await generateResultImageBlob();
-        triggerDownload(blob, `fake-health-news-result-${Date.now()}.png`);
-    } catch (err) {
-        // If the image failed to generate, still offer the caption text below.
-    }
-    await copyShareText();
-    alert('Instagram doesn\'t allow posts to be pre-filled from a website, so the result image has been downloaded and the caption copied to your clipboard. Open Instagram, start a new post or Story with that image, then paste the caption.');
 }
 
 async function copyShareText() {
