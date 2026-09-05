@@ -255,11 +255,79 @@ function computeFinalConclusion(modelResult, officialResult) {
         : { label: '⚠️ Fake News (Official Sources Only)', explanation: 'Your trained model was unavailable for this article, so this verdict comes directly from a cited official source that contradicts the claim.', bg: '#fc8181', fg: '#742a2a' };
 }
 
+// When only one model was run, there's nothing to resolve - its result just
+// IS "the" model result. When "Compare both" was picked, this decides which
+// of PubMedBERT's and BioBERT's calls actually drives the Final Conclusion
+// banner (and everything downstream of it: the downloaded image/PDF, the
+// share text, the shared /result/<id> link) - rather than always defaulting
+// to whichever one happens to be "primary":
+//
+//   - If they agree, that agreement is itself a stronger combined signal -
+//     the verdict is unchanged but the two models' confidence is averaged.
+//   - If they disagree, whichever model is more confident in its OWN call
+//     is trusted, since a fixed pecking order has no reason to be right
+//     more often than just asking which model is more sure of itself.
+//   - If only one of the two actually responded, use that one alone.
+//
+// The `note` this returns is shown wherever the banner/PDF/image explain
+// "Your Trained Model" (or the History tab shows both raw model verdicts,
+// unaffected by this - see renderModelPrediction), so it's always clear
+// which model's number is behind the conclusion and why.
+function resolveEffectiveModelResult(modelData) {
+    const results = (modelData && modelData.results) || {};
+    const keys = Object.keys(results);
+    const nameOf = (k) => MODEL_DISPLAY_NAMES[k] || k;
+
+    if (keys.length <= 1) {
+        const key = (modelData && modelData.primary) || keys[0];
+        return { key, result: results[key], note: null };
+    }
+
+    const a = { key: keys[0], result: results[keys[0]] };
+    const b = { key: keys[1], result: results[keys[1]] };
+    const responded = (r) => r && (r.verdict === 'fake' || r.verdict === 'real');
+    const aResponded = responded(a.result);
+    const bResponded = responded(b.result);
+
+    if (aResponded && !bResponded) {
+        return { key: a.key, result: a.result, note: `${nameOf(b.key)} was unavailable, so ${nameOf(a.key)} was used alone.` };
+    }
+    if (bResponded && !aResponded) {
+        return { key: b.key, result: b.result, note: `${nameOf(a.key)} was unavailable, so ${nameOf(b.key)} was used alone.` };
+    }
+    if (!aResponded && !bResponded) {
+        const key = (modelData && modelData.primary) || a.key;
+        return { key, result: results[key], note: null };
+    }
+
+    const confA = typeof a.result.confidence === 'number' ? a.result.confidence : 0;
+    const confB = typeof b.result.confidence === 'number' ? b.result.confidence : 0;
+
+    if (a.result.verdict === b.result.verdict) {
+        const avgConfidence = (confA + confB) / 2;
+        return {
+            key: a.key,
+            result: { verdict: a.result.verdict, confidence: avgConfidence, summary: a.result.summary },
+            note: `${nameOf(a.key)} (${Math.round(confA * 100)}%) and ${nameOf(b.key)} (${Math.round(confB * 100)}%) agree — confidence averaged.`
+        };
+    }
+
+    const winner = confA >= confB ? a : b;
+    const loser = confA >= confB ? b : a;
+    const winnerConf = confA >= confB ? confA : confB;
+    const loserConf = confA >= confB ? confB : confA;
+    return {
+        key: winner.key,
+        result: winner.result,
+        note: `${nameOf(winner.key)} (${Math.round(winnerConf * 100)}%) was more confident than ${nameOf(loser.key)} (${Math.round(loserConf * 100)}%), so its call was used.`
+    };
+}
+
 // Main verdict banner at the top of the results card - tells the two-step
 // story: Step 1 is your trained model's own call on the text, Step 2 is the
 // LLM independently rechecking the article against official sources. The
 // agreement badge compares the two rather than just listing them side by side.
-function renderBanner(officialResult, modelResult) {
+function renderBanner(officialResult, modelResult, modelNote) {
     // A fresh banner means brand-new DOM nodes for the label/explanation/
     // summary text below, so any translation applied to the previous
     // result's nodes is now stale - drop it rather than leaving a "Show
@@ -296,6 +364,7 @@ function renderBanner(officialResult, modelResult) {
                         ${modelMeta.label}
                     </div>
                     ${modelConfidencePct !== null ? `<div style="font-size:0.9rem;color:#4a5568;margin-top:0.25rem;">${modelConfidencePct}% confidence</div>` : ''}
+                    ${modelNote ? `<div id="modelResolutionNote" style="font-size:0.78rem;color:#718096;margin-top:0.4rem;font-style:italic;max-width:440px;margin-left:auto;margin-right:auto;">${escapeHtml(modelNote)}</div>` : ''}
 
                     <div style="margin:1rem 0;color:#cbd5e0;font-size:1.4rem;">&darr;</div>
 
@@ -605,9 +674,10 @@ function renderOneModelCard(modelKey, result) {
 // getModelPrediction - not just one model's result - so this can render
 // either a single model's card (the common case) or, when the Reader chose
 // "Compare both" in the input card, a side-by-side comparison of
-// PubMedBERT and BioBERT with an explicit agree/disagree note. Only the
-// `primary` result ever feeds the top Final Conclusion banner (see
-// renderBanner) - this tab is where the raw comparison itself lives.
+// PubMedBERT and BioBERT with an explicit agree/disagree note. This tab
+// always shows both raw results independently; the top Final Conclusion
+// banner (see renderBanner) is instead driven by whichever one wins the
+// confidence comparison in resolveEffectiveModelResult.
 function renderModelPrediction(modelData) {
     const container = document.getElementById('modelContent');
     if (!modelData || !modelData.results) {
@@ -647,7 +717,7 @@ function renderModelPrediction(modelData) {
                 ${renderOneModelCard('pubmedbert', pubmed)}
                 ${renderOneModelCard('biobert', bio)}
             </div>
-            <p style="margin-top:1.5rem;font-size:0.8rem;color:#a0aec0;">Both are independent, from-scratch fine-tunes on the same HealthStory dataset (FYP1 Chapter 5). The Final Conclusion banner above is fused against <strong>PubMedBERT's</strong> result specifically, since it was the stronger performer in that evaluation - BioBERT's result is shown here for direct comparison, not blended into the final verdict.</p>
+            <p style="margin-top:1.5rem;font-size:0.8rem;color:#a0aec0;">Both are independent, from-scratch fine-tunes on the same HealthStory dataset (FYP1 Chapter 5). The Final Conclusion banner above isn't fixed to either model: when they agree, their confidence is averaged; when they disagree, whichever model is more confident in its own call is used (see the note under "Your Trained Model" in the banner's "How this was reached" panel for exactly which one and why, this time).</p>
         </div>
     `;
 }
@@ -966,22 +1036,26 @@ function renderHistory() {
 // ============================================================================
 
 // modelData is the full { model, primary, results } object from
-// getModelPrediction. Only the primary result feeds the Final Conclusion
-// banner and the history's main model badge; when "Compare both" was
-// selected, the non-primary model's result is also recorded to History
-// (see saveToHistory) and shown in full in the "Your Model" tab.
+// getModelPrediction. When "Compare both" was selected, the Final
+// Conclusion banner doesn't just default to whichever model is "primary" -
+// resolveEffectiveModelResult picks whichever model is actually more
+// confident in its own call (or averages the two when they agree). History
+// still records both models' raw results independently (see saveToHistory),
+// and the "Your Model(s)" tab still shows the full side-by-side comparison
+// (see renderModelPrediction) - only the fused Final Conclusion changes.
 function displayResults(text, officialResult, modelData) {
     const primaryKey = modelData.primary;
     const primaryResult = modelData.results[primaryKey];
     const secondaryKey = Object.keys(modelData.results).find(k => k !== primaryKey) || null;
     const secondaryResult = secondaryKey ? modelData.results[secondaryKey] : null;
+    const modelResolution = resolveEffectiveModelResult(modelData);
 
     saveToHistory(text, officialResult, primaryResult, primaryKey, secondaryResult, secondaryKey);
 
     const resultsCard = document.getElementById('resultsCard');
     resultsCard.style.display = 'block';
 
-    renderBanner(officialResult, primaryResult);
+    renderBanner(officialResult, modelResolution.result, modelResolution.note);
     renderOfficialCheck(officialResult);
     renderModelPrediction(modelData);
     renderTextAnalysis(text);
@@ -1001,7 +1075,8 @@ function displayResults(text, officialResult, modelData) {
         primaryResult,
         secondaryKey,
         secondaryResult,
-        conclusion: computeFinalConclusion(primaryResult, officialResult),
+        modelResolution,
+        conclusion: computeFinalConclusion(modelResolution.result, officialResult),
         timestamp: new Date(),
         shareUrl: null
     };
@@ -1055,6 +1130,11 @@ function renderSharedResult(payload, id) {
     const primaryResult = modelData.results[primaryKey];
     const secondaryKey = Object.keys(modelData.results).find(k => k !== primaryKey) || null;
     const secondaryResult = secondaryKey ? modelData.results[secondaryKey] : null;
+    // Recomputed the same way as a live analysis (see displayResults) -
+    // modelData still has both models' raw results, so which one drove the
+    // Final Conclusion can be worked out again here rather than needing to
+    // have been stored ahead of time.
+    const modelResolution = resolveEffectiveModelResult(modelData);
 
     document.getElementById('newsText').value = text;
 
@@ -1070,7 +1150,7 @@ function renderSharedResult(payload, id) {
     const resultsCard = document.getElementById('resultsCard');
     resultsCard.style.display = 'block';
 
-    renderBanner(officialResult, primaryResult);
+    renderBanner(officialResult, modelResolution.result, modelResolution.note);
     renderOfficialCheck(officialResult);
     renderModelPrediction(modelData);
     renderTextAnalysis(text);
@@ -1083,7 +1163,8 @@ function renderSharedResult(payload, id) {
         primaryResult,
         secondaryKey,
         secondaryResult,
-        conclusion: computeFinalConclusion(primaryResult, officialResult),
+        modelResolution,
+        conclusion: computeFinalConclusion(modelResolution.result, officialResult),
         timestamp: payload.timestamp && !isNaN(Date.parse(payload.timestamp)) ? new Date(payload.timestamp) : new Date(),
         // Already has a permalink - reuse it instead of creating a duplicate
         // database entry the next time a Share action runs on this page.
@@ -1239,7 +1320,7 @@ function addPdfWrappedText(doc, text, x, y, maxWidth, lineHeight, margin, pageHe
 function buildReportPDF() {
     if (!lastAnalysis || !window.jspdf) return null;
     const { jsPDF } = window.jspdf;
-    const { text, officialResult, modelData, primaryResult, secondaryKey, secondaryResult, conclusion, timestamp } = lastAnalysis;
+    const { text, officialResult, modelData, primaryResult, secondaryKey, secondaryResult, modelResolution, conclusion, timestamp } = lastAnalysis;
 
     const doc = new jsPDF({ unit: 'pt', format: 'a4' });
     const pageWidth = doc.internal.pageSize.getWidth();
@@ -1332,15 +1413,16 @@ function buildReportPDF() {
     });
 
     if (secondaryKey && primaryResult && secondaryResult) {
-        const agree = primaryResult.verdict === secondaryResult.verdict;
         doc.setFont('helvetica', 'italic');
         doc.setFontSize(9.5);
         doc.setTextColor(113, 128, 150);
-        y = addPdfWrappedText(
-            doc,
-            agree ? 'Both models agree.' : 'Models disagree — see the "Your Model(s)" tab on the site for the full comparison.',
-            margin, y, contentWidth, 13, margin, pageHeight
-        );
+        // modelResolution.note explains which model's call actually drove
+        // the Final Conclusion above (higher-confidence model on a
+        // disagreement, averaged confidence on agreement) - see
+        // resolveEffectiveModelResult.
+        const note = (modelResolution && modelResolution.note)
+            || (primaryResult.verdict === secondaryResult.verdict ? 'Both models agree.' : 'Models disagree.');
+        y = addPdfWrappedText(doc, note, margin, y, contentWidth, 13, margin, pageHeight);
     }
     y += 10;
 
@@ -1473,7 +1555,13 @@ function generateResultImageBlob() {
             reject(new Error('No analysis to render yet.'));
             return;
         }
-        const { conclusion, officialResult, primaryResult, primaryKey, text, timestamp } = lastAnalysis;
+        const { conclusion, officialResult, modelResolution, primaryResult, primaryKey, text, timestamp } = lastAnalysis;
+        // Footer chip below shows whichever model's call actually drove the
+        // conclusion badge above (see resolveEffectiveModelResult) - falls
+        // back to the primary model only for the unlikely case of a shared
+        // result saved before this existed.
+        const effectiveModelKey = (modelResolution && modelResolution.key) || primaryKey;
+        const effectiveModelResult = (modelResolution && modelResolution.result) || primaryResult;
 
         const width = 1200;
         const height = 675;
@@ -1547,10 +1635,10 @@ function generateResultImageBlob() {
         ctx.fill();
         ctx.fillStyle = '#4a5568';
         ctx.font = '600 15px Inter, Arial, sans-serif';
-        const modelName = MODEL_DISPLAY_NAMES[primaryKey] || primaryKey;
-        const modelPct = primaryResult && typeof primaryResult.confidence === 'number'
-            ? Math.round(primaryResult.confidence * 100) + '%' : 'n/a';
-        const modelVerdictText = primaryResult ? String(primaryResult.verdict).toUpperCase() : 'N/A';
+        const modelName = MODEL_DISPLAY_NAMES[effectiveModelKey] || effectiveModelKey;
+        const modelPct = effectiveModelResult && typeof effectiveModelResult.confidence === 'number'
+            ? Math.round(effectiveModelResult.confidence * 100) + '%' : 'n/a';
+        const modelVerdictText = effectiveModelResult ? String(effectiveModelResult.verdict).toUpperCase() : 'N/A';
         const officialLabel = verdictMeta(officialResult.verdict).badgeText;
         ctx.fillText(
             `${modelName}: ${modelVerdictText} (${modelPct})   ·   Official check: ${officialLabel}`,
