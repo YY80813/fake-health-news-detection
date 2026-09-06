@@ -130,9 +130,9 @@ body {
     font-weight: 800;
 }
 
-.stat-label {
+.hero-stat-label {
     font-size: 0.85rem;
-    opacity: 0.85;
+    color: rgba(255, 255, 255, 0.9);
 }
 
 /* Container */
