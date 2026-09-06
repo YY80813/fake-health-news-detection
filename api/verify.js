@@ -109,6 +109,48 @@ function hostnameMatchesAllowed(hostname) {
   return ALLOWED_DOMAINS.some((domain) => h === domain || h.endsWith('.' + domain));
 }
 
+// Code-level safety net for the model narrating a blocked page-fetch
+// (robots.txt, "could not access", etc.) in its "summary" field instead of
+// silently working around it, as the prompt instructs. Prompt-only fixes
+// have proven insufficient in practice, so this catches the phrasing
+// directly regardless of what the model outputs.
+const FETCH_FAILURE_SIGNALS = [
+  'robots.txt',
+  'robots exclusion',
+  'could not access',
+  'cannot access',
+  'can not access',
+  'unable to access',
+  'could not retrieve',
+  'cannot retrieve',
+  'can not retrieve',
+  'unable to retrieve',
+  'could not open',
+  'cannot open',
+  'can not open',
+  'unable to open',
+  'attempted to access',
+  'attempted to retrieve',
+  'attempted to open',
+  'attempted to fetch',
+  'blocked by the site',
+  'blocked by the website',
+  'blocked by robots',
+  "site's robots",
+  "website's robots",
+  'preventing me from retrieving',
+  'preventing me from accessing',
+  'i cannot verify the health claims',
+  'i could not verify the article',
+  "couldn't verify the article"
+];
+
+function looksLikeFetchFailureNarrative(text) {
+  if (!text || typeof text !== 'string') return false;
+  const lower = text.toLowerCase();
+  return FETCH_FAILURE_SIGNALS.some((signal) => lower.includes(signal));
+}
+
 module.exports = async function handler(req, res) {
   // Allow the static front end to call this even if it's hosted on a
   // different origin (e.g. GitHub Pages calling a Vercel function).
@@ -229,6 +271,20 @@ module.exports = async function handler(req, res) {
         url: annotation.url,
         publisher: hostname.replace(/^www\./, '')
       });
+    }
+
+    // Second safety net, independent of the prompt instructions above: even
+    // after being told not to, the model sometimes still narrates a blocked
+    // page-fetch (robots.txt, "could not access/retrieve", etc.) as its
+    // "summary" instead of just quietly working around it — this has been
+    // observed to persist across prompt tweaks, since it's the underlying
+    // web_search tool call that hits the block, and the model treats that
+    // as material information worth mentioning regardless of instructions.
+    // Catching the phrasing here doesn't depend on the model's cooperation.
+    if (looksLikeFetchFailureNarrative(parsed.summary)) {
+      parsed.summary = officialSources.length > 0
+        ? 'One of the pages found during the search could not be opened directly (some sites block automated access), but other official-source results were still found and are shown below.'
+        : 'The search could not open the page(s) it found (some sites block automated access to their pages), so no official-source citation could be confirmed for this claim.';
     }
 
     // Safety net: if the citations didn't turn up anything on an official
