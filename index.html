@@ -32,7 +32,7 @@
     <section id="home" class="hero">
         <div class="hero-content">
             <h1>Detect <span class="highlight">Fake Health News</span> with AI</h1>
-            <p>AI-powered fact-checking that cross-references health claims against official sources — BBC Health, Malaysia's Ministry of Health (KKM), WHO, and CDC</p>
+            <p>AI-powered fact-checking that cross-references health claims against official sources — BBC Health, Malaysia's Ministry of Health (KKM), WHO, CDC, Reuters, AP, and NIH</p>
             <button class="cta-button" onclick="document.getElementById('detector').scrollIntoView({behavior: 'smooth'})">
                 Try Now →
             </button>
@@ -43,7 +43,7 @@
                 <div class="stat-label">LLM-Powered Verification</div>
             </div>
             <div class="hero-stat">
-                <div class="stat-number">4</div>
+                <div class="stat-number">7</div>
                 <div class="stat-label">Official Sources</div>
             </div>
             <div class="hero-stat">
@@ -99,7 +99,35 @@
                             </span>
                         </a>
                     </li>
+                    <li>
+                        <a class="source-sidebar-item" href="https://www.reuters.com/business/healthcare-pharmaceuticals/" target="_blank" rel="noopener noreferrer">
+                            <span class="source-sidebar-item-icon">📡</span>
+                            <span class="source-sidebar-item-text">
+                                <span class="source-sidebar-item-name">Reuters</span>
+                                <span class="source-sidebar-item-desc">International news wire service</span>
+                            </span>
+                        </a>
+                    </li>
+                    <li>
+                        <a class="source-sidebar-item" href="https://apnews.com/hub/health" target="_blank" rel="noopener noreferrer">
+                            <span class="source-sidebar-item-icon">📡</span>
+                            <span class="source-sidebar-item-text">
+                                <span class="source-sidebar-item-name">Associated Press (AP)</span>
+                                <span class="source-sidebar-item-desc">International news wire service</span>
+                            </span>
+                        </a>
+                    </li>
+                    <li>
+                        <a class="source-sidebar-item" href="https://www.nih.gov" target="_blank" rel="noopener noreferrer">
+                            <span class="source-sidebar-item-icon">🔬</span>
+                            <span class="source-sidebar-item-text">
+                                <span class="source-sidebar-item-name">NIH</span>
+                                <span class="source-sidebar-item-desc">U.S. National Institutes of Health</span>
+                            </span>
+                        </a>
+                    </li>
                 </ul>
+                <p class="source-sidebar-desc" style="margin-top:0.75rem;">Reuters, AP, and NIH were added alongside the original four because several major outlets — BBC included — restrict the automated retrieval AI search tools rely on, which could otherwise leave a real BBC-covered claim unfairly marked "unverified".</p>
             </aside>
 
             <!-- Main detector column -->
@@ -317,7 +345,7 @@ Example:
                     </div>
                     <div class="about-card">
                         <h4>🌐 Official Source Check</h4>
-                        <p>Verification is scoped to official outlets only: BBC Health, Malaysia's Ministry of Health (KKM), WHO and CDC — not general web results</p>
+                        <p>Verification is scoped to official outlets only: BBC Health, Malaysia's Ministry of Health (KKM), WHO, CDC, Reuters, AP, and NIH — not general web results</p>
                     </div>
                     <div class="about-card">
                         <h4>📎 Cited Evidence</h4>
@@ -339,7 +367,7 @@ Example:
     <footer class="footer">
         <div class="footer-content">
             <p>🏥 Fake Health News Detection System | LLM-Powered Official Source Verification</p>
-            <p>Final Year Project — Malaysia's Ministry of Health (KKM) &amp; BBC Health &amp; WHO &amp; CDC</p>
+            <p>Final Year Project — Malaysia's Ministry of Health (KKM) &amp; BBC Health &amp; WHO &amp; CDC &amp; Reuters &amp; AP &amp; NIH</p>
             <p>© 2024 - Health Misinformation Detection System</p>
         </div>
     </footer>

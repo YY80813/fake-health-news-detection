@@ -99,13 +99,14 @@ function initTabs() {
 }
 
 // ============================================================================
-// Official Source Check (BBC / KKM / WHO / CDC via LLM + web search)
+// Official Source Check (BBC / KKM / WHO / CDC / Reuters / AP / NIH via LLM + web search)
 // This is now the ONLY verdict source in the app.
 // ============================================================================
 
 // Calls the backend in api/verify.js, which asks an LLM (with a web-search
 // tool restricted to official domains) whether this article's claims line up
-// with what BBC Health, Malaysia's KKM, WHO, or CDC have actually published.
+// with what BBC Health, Malaysia's KKM, WHO, CDC, Reuters, AP, or NIH have
+// actually published.
 async function verifyOfficialSources(text) {
     try {
         const response = await fetch(VERIFY_API_URL, {
@@ -406,7 +407,7 @@ function renderOfficialCheck(result) {
                         </a>
                     `).join('')}
                 </div>
-            ` : '<p style="color:#718096;font-size:0.9rem;margin-top:1rem;">No matching pages were found on BBC, KKM, WHO or CDC.</p>'}
+            ` : '<p style="color:#718096;font-size:0.9rem;margin-top:1rem;">No matching pages were found on BBC, KKM, WHO, CDC, Reuters, AP, or NIH.</p>'}
             ${result.raw ? `<details style="margin-top:1rem;"><summary style="cursor:pointer;color:#718096;font-size:0.85rem;">Raw model output</summary><pre style="white-space:pre-wrap;font-size:0.8rem;color:#4a5568;">${escapeHtml(result.raw)}</pre></details>` : ''}
         </div>
     `;
@@ -1312,7 +1313,7 @@ async function predictNews() {
         }
         const modelData = await getModelPrediction(text, modelChoice);
 
-        if (loadingText) loadingText.textContent = 'Step 2/2: Rechecking against BBC Health, KKM, WHO and CDC...';
+        if (loadingText) loadingText.textContent = 'Step 2/2: Rechecking against BBC Health, KKM, WHO, CDC, Reuters, AP and NIH...';
         const officialResult = await verifyOfficialSources(text);
 
         loadingOverlay.style.display = 'none';
@@ -1528,7 +1529,7 @@ function buildReportPDF() {
     doc.setFont('helvetica', 'bold');
     doc.setFontSize(11.5);
     doc.setTextColor(45, 55, 72);
-    y = addPdfWrappedText(doc, 'Step 2 — Official Source Check (LLM + BBC Health / KKM / WHO / CDC)', margin, y, contentWidth, 15, margin, pageHeight);
+    y = addPdfWrappedText(doc, 'Step 2 — Official Source Check (LLM + BBC Health / KKM / WHO / CDC / Reuters / AP / NIH)', margin, y, contentWidth, 15, margin, pageHeight);
     y += 4;
 
     doc.setFont('helvetica', 'normal');
@@ -1566,7 +1567,7 @@ function buildReportPDF() {
         doc.setFontSize(9.5);
         doc.setTextColor(113, 128, 150);
         y = ensurePdfSpace(doc, y, 13, margin, pageHeight);
-        doc.text('No matching pages were found on BBC, KKM, WHO or CDC.', margin, y);
+        doc.text('No matching pages were found on BBC, KKM, WHO, CDC, Reuters, AP, or NIH.', margin, y);
     }
 
     // Disclaimer + page numbers on every page
@@ -1814,7 +1815,7 @@ function buildShareText(url) {
     const { conclusion, text } = lastAnalysis;
     const cleanLabel = conclusion.label.replace(/[✀-➿☀-⛿️]/g, '').trim();
     const snippet = text.length > 120 ? text.slice(0, 120) + '…' : text;
-    let out = `Fake Health News Detector says: ${cleanLabel}\n"${snippet}"\n\nChecked against BBC Health, KKM, WHO & CDC.`;
+    let out = `Fake Health News Detector says: ${cleanLabel}\n"${snippet}"\n\nChecked against BBC Health, KKM, WHO, CDC, Reuters, AP & NIH.`;
     if (url) out += `\n${url}`;
     return out;
 }

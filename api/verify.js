@@ -24,10 +24,22 @@
 //   trusting that to happen upstream, this function enforces it itself:
 //   after the model responds, every citation it actually used is checked
 //   against ALLOWED_DOMAINS (BBC Health, Malaysia's Ministry of Health /
-//   KKM, WHO, CDC) and anything outside that list is dropped. If NOTHING it
-//   found was on an official domain, the verdict is forced to "unverified"
-//   — the model's own opinion on what counts as official is never trusted
-//   blind.
+//   KKM, WHO, CDC, Reuters, AP, NIH) and anything outside that list is
+//   dropped. If NOTHING it found was on an official domain, the verdict is
+//   forced to "unverified" — the model's own opinion on what counts as
+//   official is never trusted blind.
+//
+// Why Reuters / AP / NIH were added alongside the original four: several
+// major outlets — BBC included — publicly block the crawlers that AI
+// web-search tools rely on to actually retrieve a page (this is well
+// documented; BBC, NYT, CNN and others opted out of GPTBot-family crawling
+// in 2023). That means even a genuinely on-topic BBC article can end up
+// with zero usable citation and a false "unverified" result, through no
+// fault of the prompt or the claim itself. Reuters, AP, and NIH cover most
+// of the same health stories, aren't known to block this kind of retrieval,
+// and are themselves widely treated as authoritative in fact-checking
+// contexts, so keeping them in the allowlist gives the checker a real path
+// to a citation even when BBC specifically can't be reached.
 //
 // NOTE: This was written and syntax-checked, but could not be live-tested
 // against the real OpenAI API from the environment that built it (no
@@ -48,7 +60,10 @@ const ALLOWED_DOMAINS = [
   'kkm.gov.my',
   'moh.gov.my',
   'who.int',
-  'cdc.gov'
+  'cdc.gov',
+  'reuters.com',
+  'apnews.com',
+  'nih.gov'
 ];
 
 const SYSTEM_PROMPT = `You are a fact-checking assistant working alongside a health-news
@@ -56,12 +71,15 @@ classifier. You will be given a submitted health news article.
 
 Use web search to check whether the article's central health claims are
 supported, contradicted, or simply not addressed by OFFICIAL sources —
-specifically BBC Health, Malaysia's Ministry of Health (KKM), WHO, or CDC.
-When you search, prefer queries scoped to those sites (for example
-"site:kkm.gov.my <topic>" or "site:who.int <topic>" or "site:bbc.com/news/health <topic>"
-or "site:cdc.gov <topic>"). Ignore blogs, forums, social media, and outlets
-that are not one of these four official sources, even if they appear in
-search results.
+specifically BBC Health, Malaysia's Ministry of Health (KKM), WHO, CDC,
+Reuters, the Associated Press (AP), or the U.S. National Institutes of
+Health (NIH). When you search, prefer queries scoped to those sites (for
+example "site:kkm.gov.my <topic>" or "site:who.int <topic>" or
+"site:bbc.com/news/health <topic>" or "site:cdc.gov <topic>" or
+"site:reuters.com <topic>" or "site:apnews.com <topic>" or
+"site:nih.gov <topic>"). Ignore blogs, forums, social media, and outlets
+that are not one of these official sources, even if they appear in search
+results.
 
 Rely on the search results' own snippets/titles to judge each source — do
 not attempt to separately open, browse, or fetch the full page content of
@@ -209,7 +227,7 @@ module.exports = async function handler(req, res) {
         // entirely for claims it already "knows" the answer to - producing
         // no url_citation annotations at all, which the safety-net check
         // below then reports as "unverified" even when the underlying fact
-        // is one WHO/CDC/BBC/KKM plainly document. "required" forces at
+        // is one WHO/CDC/BBC/KKM/Reuters/AP/NIH plainly document. "required" forces at
         // least one tool call per OpenAI's standard tool-calling contract.
         tool_choice: 'required',
         temperature: 0.2
@@ -294,7 +312,7 @@ module.exports = async function handler(req, res) {
       parsed.verdict = 'unverified';
       parsed.confidence = Math.min(parsed.confidence ?? 0.3, 0.3);
       parsed.summary = (parsed.summary ? parsed.summary + ' ' : '') +
-        '(No citation from an official source — BBC, KKM, WHO, or CDC — was found, so this could not be verified.)';
+        '(No citation from an official source — BBC, KKM, WHO, CDC, Reuters, AP, or NIH — was found, so this could not be verified.)';
     }
 
     res.status(200).json({

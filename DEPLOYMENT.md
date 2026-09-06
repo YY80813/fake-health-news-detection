@@ -72,11 +72,29 @@ OpenAI's web-search tool doesn't support a domain allowlist the way some
 other providers' search tools do, so `api/verify.js` enforces it itself, in
 code, after the model responds: every citation the model actually used is
 checked against `ALLOWED_DOMAINS` at the top of the file (`bbc.com`,
-`bbc.co.uk`, `kkm.gov.my`, `moh.gov.my`, `who.int`, `cdc.gov`), and anything
-outside that list is dropped before it reaches the front end. If nothing
-found was on an official domain, the verdict is forced to `"unverified"` —
-the model's own claimed verdict is never trusted blindly. Edit
-`ALLOWED_DOMAINS` to add or remove sources.
+`bbc.co.uk`, `kkm.gov.my`, `moh.gov.my`, `who.int`, `cdc.gov`, `reuters.com`,
+`apnews.com`, `nih.gov`), and anything outside that list is dropped before
+it reaches the front end. If nothing found was on an official domain, the
+verdict is forced to `"unverified"` — the model's own claimed verdict is
+never trusted blindly. Edit `ALLOWED_DOMAINS` to add or remove sources.
+
+**Why Reuters, AP, and NIH were added on top of the original four:** several
+major news outlets — BBC included — publicly block the crawlers that AI
+web-search tools use to actually retrieve a page's content (BBC, the New
+York Times, CNN and others opted out of OpenAI's GPTBot-family crawlers
+back in 2023; this is documented publicly, e.g. by the Reuters Institute
+and Press Gazette). In practice that means a genuinely on-topic, accurate
+BBC article can still come back with zero usable citation and get marked
+`"unverified"` — not because the claim wasn't verifiable, but because the
+search tool couldn't fetch the one site we told it to check. Reuters, AP,
+and NIH cover much of the same health news and aren't known to block this
+kind of automated retrieval, so they give the checker a real fallback path
+to an official citation even when BBC specifically can't be reached. If
+you'd rather keep the four-source scope tighter (e.g. for a stricter FYP
+scope statement), just remove the last three entries from `ALLOWED_DOMAINS`
+and the matching `site:` hints in `SYSTEM_PROMPT` — but expect BBC-sourced
+claims to show "unverified" more often as a result, through no fault of
+the claim itself.
 
 ## About the news panel and KKM
 
